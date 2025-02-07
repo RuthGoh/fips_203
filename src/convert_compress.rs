@@ -1,14 +1,13 @@
 // bit vec
+use crate::Q;
 
-fn bits_to_bytes(bit_vec:&Vec<u8>) -> Vec<u8> {
-    let mut byte_vec: Vec<u8> = Vec::with_capacity(bit_vec.len()/8);
-    byte_vec.extend(bit_vec.chunks_exact(8).map(
-        |chunk: &[u8]| -> u8 {chunk.iter().enumerate().map(|(i,e)| e<<i).sum()}
-    ));
+fn bits_to_bytes(bit_vec:&[u8]) -> Vec<u8> {
+    let mut byte_vec: Vec<u8> = vec![0;bit_vec.len()/8];
+    for i in 0..bit_vec.len() {byte_vec[i/8] |= bit_vec[i]<<(i%8)}
     byte_vec
 }
 
-pub fn bytes_to_bits(byte_vec:&Vec<u8>) -> Vec<u8> {
+pub fn bytes_to_bits(byte_vec:&[u8]) -> Vec<u8> {
     let mut bit_vec: Vec<u8> = Vec::with_capacity(byte_vec.len()*8);
     byte_vec.iter().for_each(
         |e| {(0..8).for_each(|i| bit_vec.push(e>>i & 1))}
@@ -16,44 +15,49 @@ pub fn bytes_to_bits(byte_vec:&Vec<u8>) -> Vec<u8> {
     bit_vec
 }
 
-// q=3329
-fn compress(mod_exp:&u8, vec:&mut Vec<u16>) {
-    let modulus: u32 = 2<<mod_exp-1;
+// Q=3329
+pub fn compress(d:u8, vec:&mut [u16]) {
+    let modulus: u32 = 2<<(d-1);
     for e in vec.iter_mut() {
-        *e = ((*e as u32*modulus + 3329/2)/3329) as u16;
+        *e = (((*e as u32*modulus + Q/2)/Q)%modulus) as u16;
+        // round(x/y) = floor((x+floor(y/2))/y) ?
     }
 }
 
-// q=3329
-fn decompress(mod_exp:&u8, vec:&mut Vec<u16>) {
-    let modulus: u32 = 2<<mod_exp-1;
-    for e in vec.iter_mut() {
-        *e = ((*e as u32*3329 + modulus/2)/modulus) as u16;
+// Q=3329
+pub fn decompress(d:u8, vec:&[u16]) -> Vec<u16> {
+    let modulus: u32 = 2<<(d-1);
+    let mut decomp_vec: Vec<u16> = Vec::with_capacity(vec.len());
+    for e in vec.iter() {
+        decomp_vec.push(((*e as u32*Q + modulus/2)/modulus) as u16);
     }
+    decomp_vec
 }
 
 // m=2^d if d<12, m=q if d=12
-// n=256
-fn byte_encode(mod_exp:u8, int_vec:&Vec<u16>) -> Vec<u8> {
-    let mod_exp: usize = mod_exp as usize;
-    let mut bit_vec: Vec<u8> = Vec::with_capacity(32*mod_exp);
+// N=256
+pub fn byte_encode(d:u8, int_vec:&[u16]) -> Vec<u8> {
+    let d: usize = d as usize;
+    let mut bit_vec: Vec<u8> = Vec::with_capacity(32*d);
     int_vec.iter().for_each(
-        |e| {(0..mod_exp).for_each(|j| bit_vec.push((e>>j) as u8 & 1))}
+        |e| {(0..d).for_each(|j| bit_vec.push((e>>j) as u8 & 1))}
     );
     bits_to_bytes(&bit_vec)
 }
 
-// n=256, q=3329
-fn byte_decode(mod_exp:u8, byte_vec:&Vec<u8>) -> Vec<u16> {
+// Q=3329
+// only need to modulus if mod_exp = 12?
+pub fn byte_decode(d:u8, byte_vec:&[u8]) -> Vec<u16> {
     let modulus: u16;
-    if mod_exp == 12 {modulus = 3329;}
-    else {modulus = 1<<mod_exp;}
+    if d == 12 {modulus = Q}
+    else {modulus = 1<<d}
+    let mod_exp: usize = d as usize;
     
-    let mut int_vec: Vec<u16> = Vec::with_capacity(256);
-    int_vec.extend(bytes_to_bits(byte_vec).chunks_exact(mod_exp as usize).map(
-        |chunk| -> u16 {chunk.iter().enumerate().map(
-            |(i,e)| (*e as u16)<<i
-        ).sum()}
-    ).map(|e| e%modulus));
+    let mut int_vec: Vec<u16> = vec![0;256];
+    let bit_vec = bytes_to_bits(byte_vec);
+    for i in 0..bit_vec.len() {
+        int_vec[i/mod_exp] += (bit_vec[i] as u16)<<(i%mod_exp)
+    }
+    for e in int_vec.iter_mut() {*e = *e%modulus}
     int_vec
 }
