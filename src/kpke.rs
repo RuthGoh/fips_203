@@ -1,239 +1,134 @@
-use crate::PARAMS;
-use crate::sample::{sample_NTT, sample_poly_CBD};
+use crate::sample::{sample_ntt, sample_poly_cbd};
 use crate::crypto_funcs::{g, prf};
-use crate::ntt::{NTT, NTT_inv, multiply_NTTs};
+use crate::ntt::{ntt, ntt_inv, multiply_ntts};
 use crate::convert_compress::{byte_encode, byte_decode, compress, decompress};
+use crate::{K, ETA1, ETA2, DU, DV};
 
-fn mul_mat_vec(m:&Vec<Vec<Vec<u16>>>, v:&Vec<Vec<u16>>, t:bool) -> Vec<Vec<u16>>{
-    let l = m.len();
-    let mut res: Vec<Vec<u16>> = Vec::with_capacity(l);
-    for i in 0..l {
-        res.push(vec![0;l]);
-        for j in 0..l {
-            let temp = multiply_NTTs(
-                // if transpose = true, swap i and j
-                if t {&m[j][i]} else {&m[i][j]}, &v[j]
-            );
-            for x in 0..l {
-                res[i][x] += temp[x];
-            }
+fn mul_mats(a:&[[[u16;256];K];K], u:&[[u16;256];K], t:bool) -> [[u16;256];K] {
+    core::array::from_fn(|i| {
+        let mut acc:[u16;256] = [0;256];
+        for j in 0..K {
+            let tmp = multiply_ntts(&{if t {a[j][i]} else {a[i][j]}}, &u[j]);
+            for i in 0..256 {acc[i] += tmp[i]}
         }
-    }
-    res
+        acc
+    })
 }
-fn add_vecs(l:Vec<&Vec<Vec<u16>>>) -> Vec<Vec<u16>> {
-    let l1 = l[0].len();
-    let l2 = l[0][0].len();
-    let mut res:Vec<Vec<u16>> = Vec::with_capacity(l1);
-    for i in 0..l1 {
-        res.push(vec![0;l2]);
-        for j in 0..l2 {
-            res[i][j] = {
-                let mut acc:u16 = 0;
-                for x in 0..l.len() {
-                    acc += l[x][i][j];
-                }
-                acc
-            }
-        }
+fn add_mats(u:&[[u16;256];K], v:&[[u16;256];K]) -> [[u16;256];K] {
+    core::array::from_fn(|i| {add_vecs(&u[i], &v[i])})
+}
+fn dot_prod(u:&[[u16;256];K], v:&[[u16;256];K]) -> [u16;256] {
+    let mut acc:[u16;256] = [0;256];
+    for j in 0..K {
+        let tmp = multiply_ntts(&u[j], &v[j]);
+        for i in 0..256 {acc[i] += tmp[i]}
     }
-    res
+    acc
+}
+fn add_vecs(u:&[u16;256], v:&[u16;256]) -> [u16;256] {
+    core::array::from_fn(|i| u[i] + v[i])
 }
 
-pub fn keygen(mut d:Vec<u8>) -> (Vec<u8>,Vec<u8>) {
-    let k = PARAMS[0] as u8;
-    let mut a: Vec<Vec<Vec<u16>>> = Vec::with_capacity(PARAMS[0]);
-    let mut s: Vec<Vec<u16>> = Vec::with_capacity(PARAMS[0]);
-    let mut e: Vec<Vec<u16>> = Vec::with_capacity(PARAMS[0]);
+pub fn keygen(d:&[u8;32]) -> ([u8;384*K+32],[u8;384*K]) {
+    let k = K as u8;
 
-    d.push(k);
-    let hash = g(&d);
-    let hash: Vec<&[u8]> = hash.chunks_exact(32).collect(); // roe = hash[0], sigma = hash[1]
-    let mut roe: Vec<u8> = hash[0].to_vec();
-    // push values for j,i onto roe
-    // roe will keep track of i,j
-    roe.push(0); roe.push(0);
-    for i in 0..k {
-        // push empty vector with capacity k to put j0 to j(k-1) in
-        a.push(Vec::with_capacity(PARAMS[0]));
-        roe[32] = 0;
-        for j in 0..k {
-            a[i as usize].push(sample_NTT(&roe));
-            roe[32] += 1;
-        }
-        roe[33] += 1;
-    }
+    let mut d_k = [k;33];
+    d_k[..32].clone_from_slice(d);
+    let (roe,sigma) = g(&d_k);
 
-    let mut sigma_n = hash[1].to_vec();
-    sigma_n.push(0); // the last element of the vector keeps count of N
-    for _ in 0..PARAMS[0] {
-        s.push(NTT(&sample_poly_CBD(k, &prf(PARAMS[1],&sigma_n))));
+    // create new array r <- roe||j||i
+    let mut roe_ji: [u8;34] = [0;34];
+    roe_ji[..32].clone_from_slice(&roe);
+    let a_: [[[u16;256];K];K] = core::array::from_fn(|i|
+        core::array::from_fn(|j| {
+            // assign i and j to r
+            // return the array from sample_ntt
+            // a[i][j] <- sample_ntt(&r)
+            roe_ji[32] = i as u8; roe_ji[33] = j as u8;
+            sample_ntt(&roe_ji)
+        })
+    );
+
+    let mut sigma_n: [u8;33] = [0;33]; // the last element keeps count of N
+    sigma_n[..32].clone_from_slice(&sigma);
+    let s_:[[u16;256];K] = core::array::from_fn(|_| {
+        let x = ntt(&sample_poly_cbd(K, &prf::<{ETA1*64}>(&sigma_n)));
         sigma_n[32] += 1;
-    }
-    for _ in 0..PARAMS[0] {
-        e.push(NTT(&sample_poly_CBD(k, &prf(PARAMS[1],&sigma_n))));
+        x
+    });
+    let e_:[[u16;256];K] = core::array::from_fn(|_| {
+        let x = ntt(&sample_poly_cbd(K, &prf::<{ETA1*64}>(&sigma_n)));
         sigma_n[32] += 1;
-    }
+        x
+    });
 
-    for i in s.iter_mut() {*i = NTT(i)};
-    for i in e.iter_mut() {*i = NTT(i)};
-    /* let mut t: Vec<Vec<u32>> = Vec::with_capacity(PARAMS[0]);
-    for i in 0..PARAMS[0] {
-        t.push(vec![0;PARAMS[0]]);
-        for j in 0..PARAMS[0] {
-            let temp = multiply_NTTs(&a[i][j], &s[j]);
-            for x in 0..PARAMS[0] {
-                t[i][x] += temp[x];
-            }
-        }
-        for j in 0..PARAMS[0] {
-            t[i][j] += e[i][j] as u32;
-        }
-    } */
-    let t = add_vecs(vec![&mul_mat_vec(&a, &s, false), &e]);
-
-    let mut dk: Vec<u8> = Vec::with_capacity(384*PARAMS[0]);
-    for i in 0..PARAMS[0] {
-        Vec::append(&mut dk, &mut byte_encode(12, &t[i]));
+    let t_:[[u16; 256]; K] = add_mats(&mul_mats(&a_, &s_, false), &e_);
+    let mut ek:[u8;384*K+32] = [0;384*K+32];
+    for i in 0..K {
+        ek[i*384..i*384+384].clone_from_slice(&byte_encode::<{32*12}>(12, &t_[i]));
     }
-    let mut ek1: Vec<u8> = Vec::with_capacity(384*PARAMS[0]+32);
-    for i in 0..PARAMS[0] {
-        Vec::append(&mut ek1, &mut byte_encode(12, &s[i]));
+    ek[384*K..384*K+32].clone_from_slice(&roe);
+    let mut dk:[u8;384*K] = [0;384*K];
+    for i in 0..K {
+        dk[i*384..i*384+384].clone_from_slice(&byte_encode::<{32*12}>(12, &t_[i]));
     }
-    ([ek1,hash[0].to_vec()].concat(), dk)
+    (ek,dk)
 }
 
-pub fn encrypt(ek:&[u8], m:&[u8], mut r:Vec<u8>) -> Vec<u8> {
-    let mut t: Vec<Vec<u16>> = Vec::with_capacity(PARAMS[0]);
-    let mut a: Vec<Vec<Vec<u16>>> = Vec::with_capacity(PARAMS[0]);
-    let mut y: Vec<Vec<u16>> = Vec::with_capacity(PARAMS[0]);
-    let mut e1: Vec<Vec<u16>> = Vec::with_capacity(PARAMS[0]);
+pub fn encrypt(ek:&[u8;384*K+32], m:&[u8;32], r:&[u8;32]) -> [u8;32*(DU*K+DV)] {
+    let t_:[[u16;256];K] = core::array::from_fn(|i| byte_decode(12, &ek[384*i..i*384+384]));
 
-    for i in 0..PARAMS[0] {
-        t.push(byte_decode(12, &ek[PARAMS[0]*i..PARAMS[0]*i+384]));
-    }
-    let mut roe: Vec<u8> = ek[384*PARAMS[0]..384*PARAMS[0]+32].to_vec();
-    // push values for j,i onto roe
-    // roe will keep track of i,j
-    roe.push(0); roe.push(0);
-    for i in 0..PARAMS[0] {
-        // push empty vector with capacity k to put j0 to j(k-1) in
-        a.push(Vec::with_capacity(PARAMS[0]));
-        roe[32] = 0;
-        for j in 0..PARAMS[0] as u8 {
-            a[i].push(sample_NTT(&roe));
-            roe[32] += 1;
-        }
-        roe[33] += 1;
-    }
+    // roe_ji <- roe||j||i
+    let mut roe_ji:[u8;34] = [0;34];
+    roe_ji[..32].clone_from_slice(&ek[384*K..384*K+32]);
+    let a_: [[[u16;256];K];K] = core::array::from_fn(|i|
+        core::array::from_fn(|j| {
+            // assign i and j to r
+            // return the array from sample_ntt
+            // a[i][j] <- sample_ntt(&r)
+            roe_ji[32] = i as u8; roe_ji[33] = j as u8;
+            sample_ntt(&roe_ji)
+        })
+    );
 
-    r.push(0); // the last element of the vector keeps count of N
-    for _ in 0..PARAMS[0] {
-        y.push(sample_poly_CBD(PARAMS[1] as u8, &prf(PARAMS[1],&r)));
-        r[32] += 1;
-    }
-    for _ in 0..PARAMS[0] {
-        e1.push(sample_poly_CBD(PARAMS[2] as u8, &prf(PARAMS[2],&r)));
-        r[32] += 1;
-    }
+    let mut r_n: [u8;33] = [0;33]; // the last element keeps count of N
+    r_n[..32].clone_from_slice(r);
+    let y_:[[u16;256];K] = core::array::from_fn(|_| {
+        let x = ntt(&sample_poly_cbd(ETA1, &prf::<{ETA1*64}>(&r_n)));
+        r_n[32] += 1;
+        x
+    });
+    let e1:[[u16;256];K] = core::array::from_fn(|_| {
+        let x = sample_poly_cbd(ETA2, &prf::<{ETA2*64}>(&r_n));
+        r_n[32] += 1;
+        x
+    });
 
-    let e2 = sample_poly_CBD(PARAMS[2] as u8, &prf(PARAMS[2],&r));
-    let mut y_ = Vec::with_capacity(PARAMS[0]);
-    for i in 0..PARAMS[0] {
-        y_.push(NTT(&y[i]));
-    }
-    /* // transpose a
-    for i in 0..PARAMS[0] {
-        for j in 0..PARAMS[0] {
-            let temp = a[i][j];
-            a[i][j] = a[j][i];
-            a[j][i] = temp;
-        }
-    } */
-    /* let mut u: Vec<Vec<u32>> = Vec::with_capacity(PARAMS[0]);
-    for i in 0..PARAMS[0] {
-        let mut u_acc = vec![0;PARAMS[0]];
-        for j in 0..PARAMS[0] {
-            let temp = multiply_NTTs(&a[i][j], &y[j]);
-            for x in 0..PARAMS[0] {
-                u_acc[x] += temp[x];
-            }
-        }
-        u.push(NTT_inv(&u_acc));
-        for j in 0..PARAMS[0] {
-            u[i][j] += e1[i][j] as u32;
-        }
-    } */
-    let u = add_vecs(vec![&mul_mat_vec(&a, &y_, true), &e1]);
-    let mu = decompress(1, &mut byte_decode(1, m));
+    let e2: [u16; 256] = sample_poly_cbd(ETA2, &prf::<{ETA2*64}>(&r_n));
+    
+    let tmp1 = mul_mats(&a_, &y_, true);
+    let tmp2:[[u16;256];K] = core::array::from_fn(|i| ntt_inv(&tmp1[i]));
+    let u: [[u16; 256]; K] = add_mats(&tmp2, &e1);
+    
+    let mu:[u16;256] = decompress(1, &byte_decode(1, m));
+    let v: [u16; 256] = add_vecs(&add_vecs(&ntt_inv(&dot_prod(&t_, &y_)), &e2), &mu);
 
-    /* // transpose t
-    for i in 0..PARAMS[0] {
-        for j in 0..PARAMS[0] {
-            let temp = t[i][j];
-            t[i][j] = t[j][i];
-            t[j][i] = temp;
-        }
+    let mut c = [0u8;32*(DU*K+DV)];
+    // c1
+    for i in 0..K {
+        c[i*DU..i*DU+DU].clone_from_slice(&byte_encode::<{32*DU}>(DU as u8,&compress(DU, &u[i])));
     }
-    let mut v: Vec<Vec<u32>> = Vec::with_capacity(PARAMS[0]);
-    for i in 0..PARAMS[0] {
-        let v_acc = vec![0;PARAMS[0]];
-        let temp = multiply_NTTs(&t[i], &y[i]);
-        for j in 0..PARAMS[0] {
-            v_acc[j] += temp[j];
-        }
-        NTT_inv(&v_acc);
-/*         for j in 0..PARAMS[0] {
-            v[i][j] += e[i][j] as u32;
-        } */
-    }
-    multiply_NTTs(&t, &y_);
-    let mut v = NTT_inv(&multiply_NTTs(&t, &y_));
-    */
-    let l = t.len();
-    for i in 0..l {
-        for j in 0..l {
-            let temp = t[i][j];
-            t[i][j] = t[j][i];
-            t[j][i] = temp;
-        }
-    }
-    let mut v = Vec::with_capacity(l);
-    for i in 0..l {
-        v.push(NTT_inv(&multiply_NTTs(&t[i], &y_[i])));
-    }
-    for i in 0..l {
-        v[i] += e2[i] + mu[i];
-    }
-
-    let c1 = byte_encode(PARAMS[3] as u8,compress(PARAMS[3], &mut u));
-    let c2 = byte_encode(PARAMS[4] as u8,compress(PARAMS[4], &mut v));
-    [c1,c2].concat()
+    // c2
+    c[DU*K..].clone_from_slice(&byte_encode::<{32*DV}>(DV as u8,&compress(DV, &v)));
+    c
 }
 
-pub fn decrypt(dk:&[u8], c:&[u8]) -> Vec<u8> {
-    let mut u: Vec<Vec<u16>> = Vec::with_capacity(PARAMS[0]);
-    let du = PARAMS[3] as u8;
-    for i in 0..PARAMS[0] {
-        u.push(decompress(du, &byte_decode(du, &c[i*32*PARAMS[3]..i*32*PARAMS[3]+32*PARAMS[3]])));
-    }
-    let v = decompress(PARAMS[4] as u8, &byte_decode(PARAMS[4] as u8, &c[32*PARAMS[3]*PARAMS[0]..32*(PARAMS[3]*PARAMS[0]+PARAMS[4])]));
-    let mut s: Vec<Vec<u16>> = Vec::with_capacity(PARAMS[0]);
-    for i in 0..PARAMS[0] {
-        s.push(byte_decode(12, &dk[i*32*12..i*32*12+32*12]));
-    }
-    // transpose s
-    for i in 0..PARAMS[0] {
-        for j in 0..PARAMS[0] {
-            let temp = s[i][j];
-            s[i][j] =  s[j][i];
-            s[j][i] = temp;
-        }
-    }
-    let mut w = NTT_inv(&multiply_NTTs(s, &NTT(u)));
-    for i in 0..w.len() {
-        w[i] = v[i] - w[i];
-    }
-    compress(1, &mut w);
-    byte_encode(1, &w);
+pub fn decrypt(dk:&[u8;384*K], c:&[u8;32*(DU*K+DV)]) -> [u8;32] {
+    let u: [[u16;256];K] = core::array::from_fn(|i| decompress(DU as u8, &byte_decode(DU, &c[i*32*DU..i*32*DU+32*DU])));
+    let v: [u16;256] = decompress(DV as u8, &byte_decode(DV, &c[32*DU*K..32*DU*K+32*DV]));
+    let s_: [[u16;256];K] = core::array::from_fn(|i| byte_decode(12, &dk[i*384..i*384+384]));
+    let w:[u16;256];
+    //TODO
+    //v - ntt_inv(&dot_prod(&s_, &core::array::from_fn(|i| ntt(&u[i]))));
+    byte_encode::<32>(1, &compress(1, &w))
 }

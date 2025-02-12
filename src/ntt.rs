@@ -1,6 +1,6 @@
 /// Pre-calculated values for as shown in Appendix A
 // for 17^BitRev7(index) mod 3329
-const zeta_lookup: [i32;128] = [
+const ZETA_LOOKUP: [i32;128] = [
     1,1729,2580,3289,2642,630,1897,848,
     1062,1919,193,797,2786,3260,569,1746,
     296,2447,1339,1476,3046,56,2240,1333,
@@ -20,7 +20,7 @@ const zeta_lookup: [i32;128] = [
 ];
 // for 17^(2*BitRev7(index)+1)
 // negative values have been replaced, mod 3329
-const gamma_lookup: [u32;128] = [
+const GAMMA_LOOKUP: [u32;128] = [
     17, 3312, 2761, 568, 583, 2746, 2649, 680, 
     1637, 1692, 723, 2606, 2288, 1041, 1100, 2229, 
     1409, 1920, 2662, 667, 3281, 48, 233, 3096, 
@@ -39,11 +39,12 @@ const gamma_lookup: [u32;128] = [
     2110, 1219, 2935, 394, 885, 2444, 2154, 1175
 ];
 
-use crate::Q;
+static Q: i32 = crate::Q as i32;
 
 // q=3329
-pub fn NTT(f:&[u16]) -> Vec<u16> {
-    let mut f: Vec<i32> = f.iter().map(|&e| e as i32).collect();
+pub fn ntt(f:&[u16;256]) -> [u16;256] {
+    let mut f:[i32;256] = core::array::from_fn(|i| f[i] as i32);
+
     let mut len: usize = 128;
     let mut start: usize;
     let mut i: usize = 1;
@@ -54,20 +55,21 @@ pub fn NTT(f:&[u16]) -> Vec<u16> {
         while start < 256 {
             for j in start..(start+len) {
                 // this block runs 897 times
-                let t = (zeta_lookup[i]*f[j+len])%Q as i32;
-                f[j+len] = (f[j] as i32 - t as i32)%Q as i32;
-                f[j] = (f[j] + t)%Q as i32;
+                let t = (ZETA_LOOKUP[i]*f[j+len])%Q;
+                f[j+len] = (f[j] as i32 - t as i32)%Q;
+                f[j] = (f[j] + t)%Q;
             }
             i += 1;
             start += len2;
         }
         len >>= 1;
     }
-    f.iter().map(|&e| e as u16).collect()
+    f.map(|x| x as u16)
 }
 
-pub fn NTT_inv(f:&[u16]) -> Vec<u16> {
-    let mut f: Vec<i32> = f.iter().map(|&e| e as i32).collect();
+pub fn ntt_inv(f:&[u16;256]) -> [u16;256] {
+    let mut f:[i32;256] = core::array::from_fn(|i| f[i] as i32);
+    
     let mut len: usize = 2;
     let mut start: usize;
     let mut i: usize = 127;
@@ -75,37 +77,34 @@ pub fn NTT_inv(f:&[u16]) -> Vec<u16> {
         start = 0;
         while start < 256 {
             for j in start..(start+len) {
-                // as above
                 let t = f[j];
-                f[j] = (t + f[j+len])%Q as i32;
-                f[j+len] = (zeta_lookup[i]*(f[j+len]-t))%Q as i32;
+                f[j] = (t + f[j+len])%Q;
+                f[j+len] = (ZETA_LOOKUP[i]*(f[j+len]-t))%Q;
             }
             i -= 1;
             start += len<<1;
         }
         len <<= 1;
     }
-    for e in f.iter_mut() {*e = (*e*3303)%Q as i32}
-    f.iter().map(|&e| e as u16).collect()
+    for e in f.iter_mut() {*e = (*e*3303)%Q}
+    f.map(|x| x as u16)
 }
 
-pub fn multiply_NTTs(vec1:&[u16], vec2:&[u16]) -> Vec<u16> {
-    let mut res_vec: Vec<u16> = Vec::with_capacity(256);
+pub fn multiply_ntts(f:&[u16;256], g:&[u16;256]) -> [u16;256] {
+    let mut h: [u16;256] = [0;256];
     for i in 0..128 {
-        let i2 = 2*i;
-        res_vec.extend(base_case_multiply(
-            vec1[i2] as u32, vec1[i2+1] as u32, 
-            vec2[i2] as u32, vec1[i2+1] as u32, 
-            gamma_lookup[i])
-        );
+        (h[2*i],h[2*i+1]) = base_case_multiply(
+            f[2*i] as u32, f[2*i+1] as u32, 
+            g[2*i] as u32, f[2*i+1] as u32, 
+            GAMMA_LOOKUP[i]);
     }
-    res_vec
+    h
 }
 
-// check output bit length
-fn base_case_multiply(a0:u32, a1:u32, b0:u32, b1:u32, gamma:u32) -> Vec<u16> {
-    vec![
+// TODO:check u32 bounds
+fn base_case_multiply(a0:u32, a1:u32, b0:u32, b1:u32, gamma:u32) -> (u16,u16) {
+    (
         ((a0*b0+a1*b1*gamma)%Q as u32) as u16,
         ((a0*b1+a1*b0)%Q as u32) as u16
-    ]
+    )
 }
