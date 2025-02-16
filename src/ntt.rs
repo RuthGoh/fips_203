@@ -20,7 +20,7 @@ const ZETA_LOOKUP: [i32;128] = [
 ];
 // for 17^(2*BitRev7(index)+1)
 // negative values have been replaced, mod 3329
-const GAMMA_LOOKUP: [u32;128] = [
+const GAMMA_LOOKUP: [u64;128] = [
     17, 3312, 2761, 568, 583, 2746, 2649, 680, 
     1637, 1692, 723, 2606, 2288, 1041, 1100, 2229, 
     1409, 1920, 2662, 667, 3281, 48, 233, 3096, 
@@ -42,7 +42,7 @@ const GAMMA_LOOKUP: [u32;128] = [
 static Q: i32 = crate::Q as i32;
 
 // q=3329
-pub fn ntt(f:&[u16;256]) -> [u16;256] {
+pub(crate) fn ntt(f:&[u16;256]) -> [u16;256] {
     let mut f:[i32;256] = core::array::from_fn(|i| f[i] as i32);
 
     let mut len: usize = 128;
@@ -56,7 +56,7 @@ pub fn ntt(f:&[u16;256]) -> [u16;256] {
             for j in start..(start+len) {
                 // this block runs 897 times
                 let t = (ZETA_LOOKUP[i]*f[j+len])%Q;
-                f[j+len] = (f[j] as i32 - t as i32)%Q;
+                f[j+len] = (f[j] as i32 - t as i32).rem_euclid(Q);
                 f[j] = (f[j] + t)%Q;
             }
             i += 1;
@@ -67,7 +67,7 @@ pub fn ntt(f:&[u16;256]) -> [u16;256] {
     f.map(|x| x as u16)
 }
 
-pub fn ntt_inv(f:&[u16;256]) -> [u16;256] {
+pub(crate) fn ntt_inv(f:&[u16;256]) -> [u16;256] {
     let mut f:[i32;256] = core::array::from_fn(|i| f[i] as i32);
     
     let mut len: usize = 2;
@@ -79,7 +79,7 @@ pub fn ntt_inv(f:&[u16;256]) -> [u16;256] {
             for j in start..(start+len) {
                 let t = f[j];
                 f[j] = (t + f[j+len])%Q;
-                f[j+len] = (ZETA_LOOKUP[i]*(f[j+len]-t))%Q;
+                f[j+len] = (ZETA_LOOKUP[i]*(f[j+len]-t)).rem_euclid(Q);
             }
             i -= 1;
             start += len<<1;
@@ -90,21 +90,20 @@ pub fn ntt_inv(f:&[u16;256]) -> [u16;256] {
     f.map(|x| x as u16)
 }
 
-pub fn multiply_ntts(f:&[u16;256], g:&[u16;256]) -> [u16;256] {
+pub(crate) fn multiply_ntts(f:&[u16;256], g:&[u16;256]) -> [u16;256] {
+    let base_case_multiply = |a0:u64, a1:u64, b0:u64, b1:u64, gamma:u64| {
+        (
+            ((a0*b0+a1*b1*gamma)%Q as u64) as u16,
+            ((a0*b1+a1*b0)%Q as u64) as u16
+        )
+    };
+    
     let mut h: [u16;256] = [0;256];
     for i in 0..128 {
         (h[2*i],h[2*i+1]) = base_case_multiply(
-            f[2*i] as u32, f[2*i+1] as u32, 
-            g[2*i] as u32, f[2*i+1] as u32, 
+            f[2*i] as u64, f[2*i+1] as u64, 
+            g[2*i] as u64, f[2*i+1] as u64, 
             GAMMA_LOOKUP[i]);
     }
     h
-}
-
-// TODO:check u32 bounds
-fn base_case_multiply(a0:u32, a1:u32, b0:u32, b1:u32, gamma:u32) -> (u16,u16) {
-    (
-        ((a0*b0+a1*b1*gamma)%Q as u32) as u16,
-        ((a0*b1+a1*b0)%Q as u32) as u16
-    )
 }

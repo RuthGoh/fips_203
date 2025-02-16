@@ -1,9 +1,10 @@
 use crate::kpke;
-use crate::{K, DU, DV};
-use crate::crypto_funcs::{g, h, j};
-use rand_chacha::ChaCha20Rng;
-use rand_core::{SeedableRng, RngCore};
-use crate::convert_compress::{byte_decode, byte_encode};
+//use crate::{K, DU, DV};
+use crate::crypto_fns::{g, h, j};
+use crate::byte_fns::{byte_decode, byte_encode};
+use crate::{Error, Rng};
+
+//TODO: rng.fill errors, check chacha error type, nostd rng
 
 fn keygen_internal(d:&[u8;32], z:&[u8;32]) -> ([u8;384*K+32],[u8;768*K+96]) {
     let (ek,dk_pke) = kpke::keygen(d);
@@ -16,7 +17,7 @@ fn keygen_internal(d:&[u8;32], z:&[u8;32]) -> ([u8;384*K+32],[u8;768*K+96]) {
 }
 
 fn encaps_internal(ek:&[u8;384*K+32], m:&[u8;32]) -> ([u8;32],[u8;32*(DU*K+DV)]) {
-    let mut m_h:[u8;62] = [0;62];
+    let mut m_h:[u8;64] = [0;64];
     m_h[..32].clone_from_slice(m);
     m_h[32..].clone_from_slice(&h(ek));
     let (k,r) = g(&m_h);
@@ -24,7 +25,7 @@ fn encaps_internal(ek:&[u8;384*K+32], m:&[u8;32]) -> ([u8;32],[u8;32*(DU*K+DV)])
     (k,c)
 }
 
-fn decaps_internal(dk:&[u8;768*K+96], c:&[u8;32*(DU*K+DV)]) -> [u8;32] {
+fn decaps_internal(dk:&[u8;768*K+96], c:&[u8;32*(DU*K+DV)]) -> Result<[u8;32],Error> {
     let mut dk_pke = [0u8;384*K];
     dk_pke.clone_from_slice(&dk[0..384*K]);
     let m: [u8;32] = kpke::decrypt(&dk_pke, c);
@@ -43,44 +44,40 @@ fn decaps_internal(dk:&[u8;768*K+96], c:&[u8;32*(DU*K+DV)]) -> [u8;32] {
     ek_pke.clone_from_slice(&dk[384*K..768*K+32]);
     let c_: [u8;32*(DU*K+DV)] = kpke::encrypt(&ek_pke, &m, &r);
 
-    if *c != c_ {panic!("Decapsulation failure.")}
-    k1
+    if *c == c_ {Ok(k1)} else {Err(Error::DecapsulationFailure)} // Decapsulation failure
 }
 
-//#[no_mangle]
-fn keygen() -> ([u8;384*K+32],[u8;768*K+96]) {
-    let mut rng = match ChaCha20Rng::try_from_os_rng() {
-        Ok(x) => x,
-        Err(_) => panic!("Failed to generate random numbers."),
-    };
+pub(crate) fn keygen<T>(rng:&mut Rng<T>) -> ([u8;384*K+32],[u8;768*K+96]) {
     let mut d = [0u8;32];
-    RngCore::fill_bytes(&mut rng,&mut d);
+    (rng.f)(&mut rng.rng, &mut d);
     let mut z = [0u8;32];
-    RngCore::fill_bytes(&mut rng,&mut z);
+    (rng.f)(&mut rng.rng, &mut z);
     keygen_internal(&d, &z)
 }
 
-fn encaps(ek:&[u8;384*K+32]) -> ([u8;32],[u8;32*(DU*K+DV)]) {
+//TODO?:key pair check for 3rd party keys
+
+pub(crate) fn encaps<T>(ek:&[u8;384*K+32], rng:&mut Rng<T>) -> Result<([u8;32],[u8;32*(DU*K+DV)]),Error> {
     // check input
     let kc1 = ek.len() == 384*K+32;
-    let kc2 = ek[0..384*K] == byte_encode::<{32*12}>(12, &byte_decode(12, &ek[0..384*K]));
-    if !(kc1 && kc2) {panic!("Invalid encapsulation key.")}
+    let mut kc2 = true;
+    for i in 0..K {
+        let tmp = byte_encode::<{32*12}>(12, &byte_decode(12, &ek[i*384..i*384+384]));
+        kc2 &= ek[i*384..i*384+384] == tmp;
+    }
+    if !(kc1 && kc2) {return Err(Error::InvalidKey)} //Invalid encapsulation key
 
-    let mut rng = match ChaCha20Rng::try_from_os_rng() {
-        Ok(x) => x,
-        Err(_) => panic!("Failed to generate random numbers."),
-    };
     let mut m = [0u8;32];
-    RngCore::fill_bytes(&mut rng,&mut m);
-    encaps_internal(ek, &m)
+    (rng.f)(&mut rng.rng, &mut m);
+    Ok(encaps_internal(ek, &m))
 }
 
-fn decaps(dk:&[u8;768*K+96], c:&[u8;32*(DU*K+DV)]) -> [u8;32] {
+pub(crate) fn decaps(dk:&[u8;768*K+96], c:&[u8;32*(DU*K+DV)]) -> Result<[u8;32], Error> {
     // check input
     let kc1 = c.len() == 32*(DU*K+DV);
-    let kc2 = dk.len() == 786*K+96;
+    let kc2 = dk.len() == 768*K+96;
     let kc3 = h(&dk[384*K..768*K+32]) == dk[768*K+32..768*K+64];
-    if !(kc1 && kc2 && kc3) {panic!("Invalid decapsulation key.")}
 
-    decaps_internal(dk, c)
+    if !(kc1 && kc2 && kc3) {Err(Error::InvalidKey)} // Invalid decapsulation key
+    else {decaps_internal(dk, c)}
 }

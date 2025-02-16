@@ -62,6 +62,7 @@ dependencies = [
 name = "fips_203"
 version = "0.1.0"
 dependencies = [
+ "getrandom",
  "rand_chacha",
  "rand_core",
  "sha3",
