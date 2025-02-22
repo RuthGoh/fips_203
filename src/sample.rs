@@ -25,7 +25,7 @@ pub(crate) fn sample_ntt(b:&[u8;34]) -> [u16;256] {
 
 // Q=3329
 // b length = 64*eta
-pub(crate) fn sample_poly_cbd(eta:usize, b:&[u8]) -> [u16;256] {
+pub(crate) fn sample_poly_cbd(eta:u8, b:&[u8]) -> [u16;256] {
     let bitsum = |i:&mut usize| {
         let mut acc:u8 = 0;
         for _ in 0..eta {

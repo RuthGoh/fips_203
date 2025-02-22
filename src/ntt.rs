@@ -50,17 +50,13 @@ pub(crate) fn ntt(f:&[u16;256]) -> [u16;256] {
     let mut i: usize = 1;
     // i = 1->128, len = 129
     while len>=2 {
-        start = 0;
-        let len2 = len<<1;
-        while start < 256 {
+        for start in (0..256).step_by(2*len) {
             for j in start..(start+len) {
-                // this block runs 897 times
                 let t = (ZETA_LOOKUP[i]*f[j+len])%Q;
                 f[j+len] = (f[j] as i32 - t as i32).rem_euclid(Q);
                 f[j] = (f[j] + t)%Q;
             }
             i += 1;
-            start += len2;
         }
         len >>= 1;
     }
@@ -102,7 +98,7 @@ pub(crate) fn multiply_ntts(f:&[u16;256], g:&[u16;256]) -> [u16;256] {
     for i in 0..128 {
         (h[2*i],h[2*i+1]) = base_case_multiply(
             f[2*i] as u64, f[2*i+1] as u64, 
-            g[2*i] as u64, f[2*i+1] as u64, 
+            g[2*i] as u64, g[2*i+1] as u64, 
             GAMMA_LOOKUP[i]);
     }
     h

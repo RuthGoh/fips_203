@@ -4,7 +4,6 @@
 //TODO: inline
 
 #![cfg_attr(not(feature = "std"), no_std)]
-#![no_main]
 #![forbid(unsafe_code)]
 
 //TODO: consider a no_std/std mod
@@ -43,44 +42,39 @@ impl Display for Error {
 
 const Q: u16 = 3329;
 // UNUSED const N: u16 = 256;
-/* const K: usize = 2;
-const ETA1: usize = 3;
-const ETA2: usize = 2;
-const DU: usize = 10;
-const DV: usize = 4; */
 
+//TODO: rng.fill errors
 // rng
-use rand_chacha::ChaCha20Rng;
-use rand_core::{SeedableRng, RngCore};
-pub struct Rng<T> {
+pub struct Fips203Rng<T> {
     rng: T,
-    f: fn(&mut T, &mut [u8;32])
+    f: fn(&mut T) -> [u8;32]
 }
-/* fn test() {
-    let r = ChaCha20Rng::from_os_rng();
-    fn func(rng:&mut ChaCha20Rng, m:&mut [u8;32]) {RngCore::fill_bytes(rng, m);}
-    let mut rng = Rng::<ChaCha20Rng>{
-        rng: r,
-        f: func
-    };
-    let mut a = [0u8;32];
-    (rng.f)(&mut rng.rng, &mut a);
-} */
-/* #[cfg(not(feature = "std"))]
-fn get_rng() -> ChaCha20Rng {
-    ChaCha20Rng::seed_from_u64(3810201380398309218u64)
-}
+// constructor for default rng
+// requires std
 #[cfg(feature = "std")]
-fn test_get_rng() -> Result<ChaCha20Rng, getrandom::Error> {
-    ChaCha20Rng::try_from_os_rng()
-}
+use rand::{prelude::ThreadRng, Rng};
 #[cfg(feature = "std")]
-fn get_rng() -> ChaCha20Rng {
-    match ChaCha20Rng::try_from_os_rng() {
-        Ok(x) => x,
-        Err(_) => panic!("Failed to generate random numbers."),
+impl Default for Fips203Rng<ThreadRng> {
+    fn default() -> Self {
+        Fips203Rng::<ThreadRng> {
+            rng: rand::rng(),
+            f: |rng:&mut ThreadRng| {
+                let mut m = [0u8;32];
+                rng.fill(&mut m);
+                m
+            }
+        }
     }
-} */
+}
+// constructor for custom rng
+impl<T> Fips203Rng<T> {
+    pub fn new(r:T, func:fn(&mut T) -> [u8;32]) -> Self {
+        Fips203Rng::<T> {
+            rng: r,
+            f: func
+        }
+    }
+}
 
 trait MlkemT {
     const K: usize;
@@ -88,65 +82,51 @@ trait MlkemT {
     const ETA2: usize;
     const DU: usize;
     const DV: usize;
-    // rng type instead of struct?
 
-    fn new(&self) -> Self where Self:Sized;
-    //fn with_rng(&self) -> Self where Self:Sized;
-
-    fn keygen(&self) -> ([u8;384*K+32],[u8;768*K+96]) where Self:Sized {
-        mlkem::keygen(rng)
-    }
-    fn encaps<T>(&self, ek:&[u8;384*K+32]) -> Result<([u8;32],[u8;32*(DU*K+DV)]),Error> {
-        mlkem::encaps(ek, rng)
-    }
-    fn decaps(&self, dk:&[u8;768*K+96], c:&[u8;32*(DU*K+DV)]) -> Result<[u8;32], Error> {
-        mlkem::decaps(dk, c)
-    }
+    const EK_LEN:usize = 384*Self::K+32;
+    const DK_LEN:usize = 768*Self::K+96;
+    const C_LEN:usize = 32*(Self::DU*Self::K+Self::DV);
 }
-pub struct MLKEM_512 {
-    //rng: Rng<T>
-    //TODO: rng bit security level
+macro_rules! impl_mlkem {
+    ($name:ident, $k:expr, $eta1:expr, $eta2:expr, $du:expr, $dv:expr) => {
+        pub struct $name {}
+        impl MlkemT for $name {
+            const K: usize = $k;
+            const ETA1: usize = $eta1;
+            const ETA2: usize = $eta2;
+            const DU: usize = $du;
+            const DV: usize = $dv;
+        }
+        impl $name {
+            pub fn keygen<T>(rng:&mut Fips203Rng<T>) -> ([u8;Self::EK_LEN], [u8;Self::DK_LEN]) {
+                let mut ek = [0u8;Self::EK_LEN];
+                let mut dk = [0u8;Self::DK_LEN];
+                mlkem::keygen::<T, {$k}, {$eta1*64}>(rng, &mut ek, &mut dk);
+                (ek,dk)
+            }
+            pub fn encaps<T>(ek:&[u8;Self::EK_LEN], rng:&mut Fips203Rng<T>) -> Result<([u8;32],[u8;Self::C_LEN]),Error> {
+                let mut k = [0u8;32];
+                let mut c = [0u8;Self::C_LEN];
+                match mlkem::encaps::
+                <T, {$k}, {$eta1*64}, {$eta2*64}, {$du*32}, {$dv*32}>
+                (ek, rng, &mut k, &mut c, Self::DU as u8, Self::DV as u8) {
+                    Ok(_) => Ok((k,c)),
+                    Err(e) => Err(e)
+                }
+            }
+            pub fn decaps(dk:&[u8;Self::DK_LEN], c:&[u8;Self::C_LEN]) -> Result<[u8;32], Error> {
+                let mut k = [0u8;32];
+                let mut c_ = [0u8;Self::C_LEN];
+                match mlkem::decaps::
+                <{$k}, {$eta1*64}, {$eta2*64}, {$du*32}, {$dv*32}, {32+32*($du*$k+$dv)}>
+                (dk, c, &mut k, &mut c_, $du as u8, $dv as u8) {
+                    Ok(_) => Ok(k),
+                    Err(e) => Err(e)
+                }
+            } 
+        }
+    };
 }
-impl MlkemT for MLKEM_512 {
-    const K: usize = 2;
-    const ETA1: usize = 3;
-    const ETA2: usize = 2;
-    const DU: usize = 10;
-    const DV: usize = 4;
-
-    fn new(&self) -> Self where Self:Sized {MLKEM_512{}}
-}
-/* pub struct MLKEM_768 {}
-impl MlkemT for MLKEM_768 {
-    const K: usize = 3;
-    const ETA1: usize = 2;
-    const ETA2: usize = 2;
-    const DU: usize = 10;
-    const DV: usize = 4;
-}
-pub struct MLKEM_1024 {}
-impl MlkemT for MLKEM_1024 {
-    const K: usize = 4;
-    const ETA1: usize = 2;
-    const ETA2: usize = 2;
-    const DU: usize = 11;
-    const DV: usize = 5;
-} */
-
-trait TestT {
-    const K:usize;
-    fn testfn()->u8;
-}
-enum Test {
-    A(Test1),
-}
-struct Test1 {}
-impl TestT for Test1 {
-    const K:usize = 3;
-    fn testfn()->u8 {1}
-}
-impl Test {
-    fn t() -> Self {
-        Test::A(Test1 {})
-    }
-}
+impl_mlkem!(MLKEM_512,2,3,2,10,4);
+impl_mlkem!(MLKEM_768,3,2,2,10,4);
+impl_mlkem!(MLKEM_1024,4,2,2,11,5);
