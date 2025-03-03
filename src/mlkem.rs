@@ -22,16 +22,18 @@ pub(crate) fn encaps
 <T, const K:usize, const ETA1_64:usize, const ETA2_64:usize, const DU_32:usize, const DV_32:usize>
 (ek:&[u8], rng:&mut Fips203Rng<T>, k:&mut [u8;32], c:&mut [u8], du:u8, dv:u8) -> Result<(),Error> {
     // check input
+    /* The following checks are not required as they have been enforced by the public wrapper function in lib.rs
     let kc1 = ek.len() == 384*K+32;
+     */
     let mut kc2 = true;
     for i in 0..K {
         let tmp = byte_encode::<{32*12}>(12, &byte_decode(12, &ek[i*384..i*384+384]));
         kc2 &= ek[i*384..i*384+384] == tmp;
     }
-    if !(kc1 && kc2) {return Err(Error::InvalidKey)} //Invalid encapsulation key
+    if !kc2 {return Err(Error::InvalidInput)} //Invalid encapsulation key
 
     let m = (rng.f)(&mut rng.rng);
-    encaps_internal::<K,ETA1_64,ETA2_64,DU_32,DV_32>(ek, &m, k, c, du, dv)    
+    encaps_internal::<K,ETA1_64,ETA2_64,DU_32,DV_32>(ek, &m, k, c, du, dv) 
 }
 #[inline]
 fn encaps_internal
@@ -50,11 +52,13 @@ pub(crate) fn decaps
 <const K:usize, const ETA1_64:usize, const ETA2_64:usize, const DU_32:usize, const DV_32:usize, const ZC_LEN:usize>
 (dk:&[u8], c:&[u8], k:&mut [u8;32], c_:&mut [u8], du:u8, dv:u8) -> Result<(), Error> {
     // check input
+    /* 
+    The following checks are not required as they have been enforced by the public wrapper function in lib.rs
     let kc1 = c.len() == 32*((du as usize)*K+(dv as usize));
     let kc2 = dk.len() == 768*K+96;
+     */
     let kc3 = h(&dk[384*K..768*K+32]) == dk[768*K+32..768*K+64];
-
-    if !(kc1 && kc2 && kc3) {return Err(Error::InvalidKey)} // Invalid decapsulation key
+    if !kc3 {return Err(Error::InvalidInput)} // Invalid decapsulation input
 
     // internal
     let m = kpke::decrypt::<K>(&dk[0..384*K], c, du, dv);
@@ -72,6 +76,7 @@ pub(crate) fn decaps
 
     kpke::encrypt::<K, ETA1_64, ETA2_64, DU_32, DV_32>(&dk[384*K..768*K+32], &m, &r, c_, du, dv);
 
+    //let c_match = c == c_;
     if c != c_ {*k = k2} // Decapsulation failure
     Ok(())
 }

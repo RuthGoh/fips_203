@@ -1,4 +1,4 @@
-/// Pre-calculated values for as shown in Appendix A
+// Pre-calculated values for as shown in Appendix A
 // for 17^BitRev7(index) mod 3329
 const ZETA_LOOKUP: [i32;128] = [
     1,1729,2580,3289,2642,630,1897,848,
@@ -41,12 +41,10 @@ const GAMMA_LOOKUP: [u64;128] = [
 
 static Q: i32 = crate::Q as i32;
 
-// q=3329
 pub(crate) fn ntt(f:&[u16;256]) -> [u16;256] {
     let mut f:[i32;256] = core::array::from_fn(|i| f[i] as i32);
 
     let mut len: usize = 128;
-    let mut start: usize;
     let mut i: usize = 1;
     // i = 1->128, len = 129
     while len>=2 {

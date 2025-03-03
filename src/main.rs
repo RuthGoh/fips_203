@@ -10,10 +10,7 @@ pub(crate) fn main() {
     });
 
     let (ek,dk) = MLKEM_1024::keygen(&mut rng);
-    let (k,c) = match MLKEM_1024::encaps(&ek, &mut rng) {
-        Ok(x) => x,
-        Err(e) => panic!("{}",e)
-    };
+    let (k,c) = MLKEM_1024::encaps(&ek, &mut rng).expect("hi");
     let k_ = match MLKEM_1024::decaps(&dk, &c) {
         Ok(x) => x,
         Err(e) => panic!("{}",e)

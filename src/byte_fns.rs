@@ -1,6 +1,5 @@
 use crate::Q;
 
-// Q=3329
 pub(crate) fn compress(d:u8, u:&[u16;256]) -> [u16;256] {
     let q = Q as u32;
     let m: u32 = 1<<d;
@@ -9,7 +8,6 @@ pub(crate) fn compress(d:u8, u:&[u16;256]) -> [u16;256] {
     core::array::from_fn(|i| (((m*(u[i] as u32)+q/2)/q)%m) as u16)
 }
 
-// Q=3329
 pub(crate) fn decompress(d:u8, u:&[u16;256]) -> [u16;256] {
     let m: u32 = 1<<d;
     // round(i/j) = floor((i+floor(j/2))/j)
@@ -17,11 +15,8 @@ pub(crate) fn decompress(d:u8, u:&[u16;256]) -> [u16;256] {
     core::array::from_fn(|i| (((Q as u32)*(u[i] as u32)+m/2)/m) as u16)
 }
 
-// m=2^d if d<12, m=q if d=12
-// N=256
-// LEN=32*d
-pub(crate) fn byte_encode<const LEN:usize>(d:u8, f:&[u16;256]) -> [u8;LEN] {
-    let mut b = [0u8;LEN];
+pub(crate) fn byte_encode<const D_32:usize>(d:u8, f:&[u16;256]) -> [u8;D_32] {
+    let mut b = [0u8;D_32];
     let mut byte_idx: usize = 0;
     let mut bit_idx: u8 = 0;
     for e in f {

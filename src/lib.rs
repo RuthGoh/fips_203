@@ -1,19 +1,32 @@
+// Check compilation with
 // cargo check --lib --no-default-features --target thumbv7m-none-eabi
 // cargo check --lib
+
+//! Pure Rust implementation of [FIPS 203](https://doi.org/10.6028/NIST.FIPS.203).
+//! 
+//! Use with `default-features=false` for `no-std`.
+//! 
+//! # Example
+//! ```
+//! use fips203::{MLKEM_1024, Fips203Rng};
+//! 
+//! pub fn main() {
+//!     let mut rng = Fips203Rng::default();
+//!     let (ek,dk) = MLKEM_1024::keygen(&mut rng);
+//!     let (k,c) = MLKEM_1024::encaps(&ek, &mut rng).expect("Encapsulation failure");
+//!     let k_prime = MLKEM_1024::decaps(&dk, &c).expect("Decapsulation failure");
+//!     if k != k_prime {panic!("Decapsulation failure")}
+//! }
+//! ```
 
 //TODO: inline
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![forbid(unsafe_code)]
+#![warn(missing_docs)]
+#![allow(non_camel_case_types)]
 
-//TODO: consider a no_std/std mod
-#[cfg(not(feature = "std"))]
-use core::panic::PanicInfo;
-#[cfg(not(feature = "std"))]
-#[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
-    loop {}
-}
+use zeroize::Zeroizing;
 
 mod crypto_fns;
 mod byte_fns;
@@ -22,11 +35,11 @@ mod ntt;
 mod kpke;
 mod mlkem;
 
-// errors
+/// Custom errors for the package
 #[derive(Debug)]
 pub enum Error {
-    DecapsulationFailure,
-    InvalidKey
+    /// Input failed input checks. Used in `encaps` and `decaps`
+    InvalidInput
     //TODO: more
 }
 impl core::error::Error for Error {}
@@ -34,8 +47,7 @@ use core::fmt::{Display, Formatter, Result as fmtResult};
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter) -> fmtResult {
         match self {
-            Error::DecapsulationFailure => write!(f,"Decapsulation Failure"),
-            Error::InvalidKey => write!(f, "Invalid Key")
+            Error::InvalidInput => write!(f, "Invalid input, failed input check")
         }
     }
 }
@@ -44,17 +56,47 @@ const Q: u16 = 3329;
 // UNUSED const N: u16 = 256;
 
 //TODO: rng.fill errors
-// rng
+/// Struct defining the Random Bit Generator to be used.
+/// 
+/// # Example
+/// Default RNG
+/// ```
+/// # use fips203::Fips203Rng;
+/// let mut rng = Fips203Rng::default();
+/// ```
+/// Custom RNG
+/// ```
+/// # use fips203::Fips203Rng;
+/// use rand::{prelude::ThreadRng, Rng};
+/// 
+/// let r = rand::rng();
+/// let f = |rng:&mut ThreadRng| {
+///     let mut m = [0u8;32];
+///     rng.fill(&mut m);
+///     m
+/// };
+/// let mut rng = Fips203Rng::new(r, f);
+/// ```
 pub struct Fips203Rng<T> {
-    rng: T,
-    f: fn(&mut T) -> [u8;32]
+    /// A random number generator with type T.
+    pub rng: T,
+    /// A function which takes in an RNG of type T and returns a randomly-filled 32-byte array.
+    pub f: fn(&mut T) -> [u8;32]
 }
-// constructor for default rng
-// requires std
 #[cfg(feature = "std")]
 use rand::{prelude::ThreadRng, Rng};
 #[cfg(feature = "std")]
 impl Default for Fips203Rng<ThreadRng> {
+    /// Constructor for default RNG.
+    /// 
+    /// Not available with `default-features=false`, requires `std`.
+    /// 
+    /// Uses [`rand` version 0.9.0](`rand`)
+    /// 
+    /// * `rng` [`rand::rng`], ChaCha12
+    /// * `f` [`rand::fill`] 
+    /// 
+    /// [`Default` documentation](std::default::Default::default)
     fn default() -> Self {
         Fips203Rng::<ThreadRng> {
             rng: rand::rng(),
@@ -66,8 +108,10 @@ impl Default for Fips203Rng<ThreadRng> {
         }
     }
 }
-// constructor for custom rng
 impl<T> Fips203Rng<T> {
+    /// Constructor for a custom RNG
+    /// 
+    /// Note that the RBG should have a bit-strength of at least 128 (ML-KEM 512), 192 (ML-KEM 768), or 256 (ML-KEM 1024)
     pub fn new(r:T, func:fn(&mut T) -> [u8;32]) -> Self {
         Fips203Rng::<T> {
             rng: r,
@@ -76,50 +120,63 @@ impl<T> Fips203Rng<T> {
     }
 }
 
-trait MlkemT {
-    const K: usize;
-    const ETA1: usize;
-    const ETA2: usize;
-    const DU: usize;
-    const DV: usize;
-
-    const EK_LEN:usize = 384*Self::K+32;
-    const DK_LEN:usize = 768*Self::K+96;
-    const C_LEN:usize = 32*(Self::DU*Self::K+Self::DV);
-}
 macro_rules! impl_mlkem {
     ($name:ident, $k:expr, $eta1:expr, $eta2:expr, $du:expr, $dv:expr) => {
+        /// Struct for ML-KEM version.
         pub struct $name {}
-        impl MlkemT for $name {
-            const K: usize = $k;
-            const ETA1: usize = $eta1;
-            const ETA2: usize = $eta2;
-            const DU: usize = $du;
-            const DV: usize = $dv;
-        }
         impl $name {
+            const EK_LEN:usize = 384*$k+32;
+            const DK_LEN:usize = 768*$k+96;
+            const C_LEN:usize = 32*($du*$k+$dv);
+
+            /// Generates an encapsulation key and a corresponding decapsulation key.
+            /// 
+            /// # Arguments
+            /// * `rng` An implementation of [`Fips203Rng`]
+            /// # Returns
+            /// * `(encapsulation key, decapsulation key)`
             pub fn keygen<T>(rng:&mut Fips203Rng<T>) -> ([u8;Self::EK_LEN], [u8;Self::DK_LEN]) {
                 let mut ek = [0u8;Self::EK_LEN];
                 let mut dk = [0u8;Self::DK_LEN];
                 mlkem::keygen::<T, {$k}, {$eta1*64}>(rng, &mut ek, &mut dk);
                 (ek,dk)
             }
+
+            /// Uses the encapsulation key to generate a shared secret key and an associated ciphertext.
+            /// 
+            /// Includes encapsulation key check. If check fails, function returns `Err(InvalidInput)`.
+            /// 
+            /// # Arguments
+            /// * `ek` An encapsulation key
+            /// * `rng` An implementation of [`Fips203Rng`]
+            /// # Returns
+            /// * `Result<(shared secret key, ciphertext), Error>`
             pub fn encaps<T>(ek:&[u8;Self::EK_LEN], rng:&mut Fips203Rng<T>) -> Result<([u8;32],[u8;Self::C_LEN]),Error> {
                 let mut k = [0u8;32];
                 let mut c = [0u8;Self::C_LEN];
                 match mlkem::encaps::
                 <T, {$k}, {$eta1*64}, {$eta2*64}, {$du*32}, {$dv*32}>
-                (ek, rng, &mut k, &mut c, Self::DU as u8, Self::DV as u8) {
+                (ek, rng, &mut k, &mut c, $du, $dv) {
                     Ok(_) => Ok((k,c)),
                     Err(e) => Err(e)
                 }
             }
+
+            /// Uses the decapsulation key to produce a shared secret key from a ciphertext.
+            /// 
+            /// Includes decapsulation input check. If check fails, function returns `Err(InvalidInput)`.
+            /// 
+            /// # Arguments
+            /// * `dk` A decapsulation key
+            /// * `c` A ciphertext
+            /// # Returns
+            /// * `Result<shared secret key, Error>`
             pub fn decaps(dk:&[u8;Self::DK_LEN], c:&[u8;Self::C_LEN]) -> Result<[u8;32], Error> {
                 let mut k = [0u8;32];
                 let mut c_ = [0u8;Self::C_LEN];
                 match mlkem::decaps::
                 <{$k}, {$eta1*64}, {$eta2*64}, {$du*32}, {$dv*32}, {32+32*($du*$k+$dv)}>
-                (dk, c, &mut k, &mut c_, $du as u8, $dv as u8) {
+                (dk, c, &mut k, &mut c_, $du, $dv) {
                     Ok(_) => Ok(k),
                     Err(e) => Err(e)
                 }

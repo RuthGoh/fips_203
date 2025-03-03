@@ -25,7 +25,7 @@ fn dot_prod<const K:usize>(u:&[[u16;256];K], v:&[[u16;256];K]) -> [u16;256] {
     }
     acc
 }
-pub(crate) fn add_vecs(u:&[u16;256], v:&[u16;256]) -> [u16;256] {
+fn add_vecs(u:&[u16;256], v:&[u16;256]) -> [u16;256] {
     core::array::from_fn(|i| (u[i] + v[i])%Q)
 }
 
