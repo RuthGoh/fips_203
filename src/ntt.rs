@@ -46,7 +46,6 @@ pub(crate) fn ntt(f:&[u16;256]) -> [u16;256] {
 
     let mut len: usize = 128;
     let mut i: usize = 1;
-    // i = 1->128, len = 129
     while len>=2 {
         for start in (0..256).step_by(2*len) {
             for j in start..(start+len) {

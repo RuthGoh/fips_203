@@ -1,9 +1,10 @@
 use fips203::{MLKEM_1024, Fips203Rng};
 
+#[cfg(feature = "std")]
 pub(crate) fn main() {
     let mut def_rng = Fips203Rng::default();
     use rand::{prelude::ThreadRng, Rng};
-    let mut rng = Fips203Rng::new(rand::rng(), |rng:&mut ThreadRng| {
+    let mut rng = Fips203Rng::custom(rand::rng(), |rng:&mut ThreadRng| {
         let mut m = [0u8;32];
         rng.fill(&mut m);
         m

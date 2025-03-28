@@ -16,8 +16,6 @@ fn keygen_internal<const K:usize, const ETA1_64:usize>(d:&[u8], z:&[u8], ek:&mut
     dk[384*K*2+64..].clone_from_slice(z);
 }
 
-//TODO?:key pair check for 3rd party keys
-
 pub(crate) fn encaps
 <T, const K:usize, const ETA1_64:usize, const ETA2_64:usize, const DU_32:usize, const DV_32:usize>
 (ek:&[u8], rng:&mut Fips203Rng<T>, k:&mut [u8;32], c:&mut [u8], du:u8, dv:u8) -> Result<(),Error> {
@@ -76,13 +74,15 @@ pub(crate) fn decaps
 
     kpke::encrypt::<K, ETA1_64, ETA2_64, DU_32, DV_32>(&dk[384*K..768*K+32], &m, &r, c_, du, dv);
 
+    //TODO destroy flag
     //let c_match = c == c_;
     if c != c_ {*k = k2} // Decapsulation failure
     Ok(())
 }
 
 
-
+//TODO
+//#[cfg(feature = "no_std")]
 #[cfg(test)]
 mod tests {
     use hex::{decode_to_slice, encode_upper};
