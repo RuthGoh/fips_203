@@ -6,9 +6,6 @@ edition = "2021"
 [lib]
 name = "fips203"
 path = "src/lib.rs"
-[[bin]]
-name = "main"
-path = "src/main.rs"
 
 [dependencies]
 sha3 = {version="0.10.8", default-features=false}

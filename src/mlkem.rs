@@ -80,8 +80,6 @@ pub(crate) fn decaps
     Ok(())
 }
 
-
-//TODO
 #[cfg(not(feature = "std"))]
 #[cfg(test)]
 mod tests {
