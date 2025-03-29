@@ -82,144 +82,92 @@ pub(crate) fn decaps
 
 
 //TODO
-//#[cfg(feature = "no_std")]
+#[cfg(not(feature = "std"))]
 #[cfg(test)]
 mod tests {
-    use hex::{decode_to_slice, encode_upper};
-    use serde_json::Value;
     use super::*;
-    
+    include!("../tests/data/data.rs");
+
     #[test]
     fn test_keygen() {
-        let data: Value = serde_json::from_str(include_str!("../tests/data/keygen.json")).expect("unable to parse data");
-        
         for i in 0..25 {
-            let d = &data["testGroups"][0]["tests"][i];
-            //K=2, ETA1=3
             test::<{384*2+32},{768*2+96},2,{64*3}>(
-                d["d"].as_str().expect("failed to retrieve data"),d["z"].as_str().expect("failed to retrieve data"),
-                d["ek"].as_str().expect("failed to retrieve data"),d["dk"].as_str().expect("failed to retrieve data")
+                &keygen_512[i].0,&keygen_512[i].1,&keygen_512[i].2,&keygen_512[i].3
             );
         }
         for i in 0..25 {
-            let d = &data["testGroups"][1]["tests"][i];
-            //K=3, ETA1=2
             test::<{384*3+32},{768*3+96},3,{64*2}>(
-                d["d"].as_str().expect("failed to retrieve data"),d["z"].as_str().expect("failed to retrieve data"),
-                d["ek"].as_str().expect("failed to retrieve data"),d["dk"].as_str().expect("failed to retrieve data")
+                &keygen_768[i].0,&keygen_768[i].1,&keygen_768[i].2,&keygen_768[i].3
             );
         }
         for i in 0..25 {
-            let d = &data["testGroups"][2]["tests"][i];
-            //K=4, ETA1=2
             test::<{384*4+32},{768*4+96},4,{64*2}>(
-                d["d"].as_str().expect("failed to retrieve data"),d["z"].as_str().expect("failed to retrieve data"),
-                d["ek"].as_str().expect("failed to retrieve data"),d["dk"].as_str().expect("failed to retrieve data")
+                &keygen_1024[i].0,&keygen_1024[i].1,&keygen_1024[i].2,&keygen_1024[i].3
             );
         }
 
         #[inline]
-        fn test<const EK_LEN:usize, const DK_LEN:usize, const K:usize, const ETA1_64:usize>(d_str:&str, z_str:&str, ek_str:&str, dk_str:&str) {
-            let mut ek = [0u8;EK_LEN];
-            let mut dk = [0u8;DK_LEN];
-            let mut d = [0u8;32];
-            let mut z = [0u8;32];
-            decode_to_slice(d_str,&mut d).expect("Decode failure");
-            decode_to_slice(z_str,&mut z).expect("Decode failure");
-            keygen_internal::<K,{ETA1_64}>(&d, &z, &mut ek, &mut dk);
-            assert_eq!(encode_upper(ek),ek_str);
-            assert_eq!(encode_upper(dk),dk_str);
+        fn test<const EK_LEN:usize, const DK_LEN:usize, const K:usize, const ETA1_64:usize>(d:&[u8], z:&[u8], ek:&[u8], dk:&[u8]) {
+            let mut ek1 = [0u8;EK_LEN];
+            let mut dk1 = [0u8;DK_LEN];
+            keygen_internal::<K,{ETA1_64}>(&d, &z, &mut ek1, &mut dk1);
+            assert_eq!(ek1,ek);
+            assert_eq!(dk1,dk);
         }
     }
 
     #[test]
     fn test_encaps() {
-        let data: Value = serde_json::from_str(include_str!("../tests/data/encaps_decaps.json")).expect("unable to parse data");
-
         for i in 0..25 {
-            let d = &data["testGroups"][0]["tests"][i];
-            //K=2, ETA1=3, ETA2=2, DU=10, DV=4
             test::<{384*2+32},{32*(10*2+4)},2,{3*64},{2*64},{10*32},{4*32}>(
-                10,4,
-                d["ek"].as_str().expect("failed to retrieve data"),d["m"].as_str().expect("failed to retrieve data"),
-                d["c"].as_str().expect("failed to retrieve data"),d["k"].as_str().expect("failed to retrieve data")
+                10,4,&encaps_512[i].0,&encaps_512[i].1,&encaps_512[i].2,&encaps_512[i].3
             );
         }
         for i in 0..25 {
-            let d = &data["testGroups"][1]["tests"][i];
-            //K=3, ETA1=2, ETA2=2, DU=10, DV=4
             test::<{384*3+32},{32*(10*3+4)},3,{2*64},{2*64},{10*32},{4*32}>(
-                10,4,
-                d["ek"].as_str().expect("failed to retrieve data"),d["m"].as_str().expect("failed to retrieve data"),
-                d["c"].as_str().expect("failed to retrieve data"),d["k"].as_str().expect("failed to retrieve data")
+                10,4,&encaps_768[i].0,&encaps_768[i].1,&encaps_768[i].2,&encaps_768[i].3
             );
         }
         for i in 0..25 {
-            let d = &data["testGroups"][2]["tests"][i];
-            //K=4, ETA1=2, ETA2=2, DU=11, DV=5
             test::<{384*4+32},{32*(11*4+5)},4,{2*64},{2*64},{11*32},{5*32}>(
-                11,5,
-                d["ek"].as_str().expect("failed to retrieve data"),d["m"].as_str().expect("failed to retrieve data"),
-                d["c"].as_str().expect("failed to retrieve data"),d["k"].as_str().expect("failed to retrieve data")
+                11,5,&encaps_1024[i].0,&encaps_1024[i].1,&encaps_1024[i].2,&encaps_1024[i].3
             );
         }
 
         #[inline]
-        fn test<const EK_LEN:usize, const C_LEN:usize, const K:usize, const ETA1_64:usize, const ETA2_64:usize, const DU_32:usize, const DV_32:usize>(du: u8, dv: u8, ek_str:&str, m_str:&str, c_str:&str, k_str:&str) {
-            let mut ek = [0u8;EK_LEN];
-            let mut m = [0u8;32];
-            decode_to_slice(ek_str,&mut ek).expect("Decode failure");
-            decode_to_slice(m_str,&mut m).expect("Decode failure");
-            let mut k = [0u8;32];
-            let mut c = [0u8;C_LEN];
-            let _ = encaps_internal::<K,{ETA1_64},{ETA2_64},{DU_32},{DV_32}>(&ek, &m, &mut k, &mut c, du, dv);
-            assert_eq!(encode_upper(c),c_str);
-            assert_eq!(encode_upper(k),k_str);
+        fn test<const EK_LEN:usize, const C_LEN:usize, const K:usize, const ETA1_64:usize, const ETA2_64:usize, const DU_32:usize, const DV_32:usize>(du: u8, dv: u8, ek:&[u8], m:&[u8;32], c:&[u8], k:&[u8]) {
+            let mut k1 = [0u8;32];
+            let mut c1 = [0u8;C_LEN];
+            let _ = encaps_internal::<K,{ETA1_64},{ETA2_64},{DU_32},{DV_32}>(ek, m, &mut k1, &mut c1, du, dv);
+            assert_eq!(c1,c);
+            assert_eq!(k1,k);
         }
     }
 
     #[test]
     fn test_decaps() {
-        let data: Value = serde_json::from_str(include_str!("../tests/data/encaps_decaps.json")).expect("unable to parse data");
-        
-        let dk = data["testGroups"][3]["dk"].as_str().expect("failed to retrieve data");
         for i in 0..10 {
-            let c = data["testGroups"][3]["tests"][i]["c"].as_str().expect("failed to retrieve data");
-            let k = data["testGroups"][3]["tests"][i]["k"].as_str().expect("failed to retrieve data");
-            //K=2, ETA1=3, ETA2=2, DU=10, DV=4
             test::<{768*2+96},{32*(10*2+4)},2,{3*64},{2*64},{10*32},{4*32},{32+32*(10*2+4)}>(
-                10,4,dk,c,k
+                10,4,&decaps_512[i].0,&decaps_512[i].1,&decaps_512[i].2
             );
         }
-        let dk = data["testGroups"][4]["dk"].as_str().expect("failed to retrieve data");
         for i in 0..10 {
-            let c = data["testGroups"][4]["tests"][i]["c"].as_str().expect("failed to retrieve data");
-            let k = data["testGroups"][4]["tests"][i]["k"].as_str().expect("failed to retrieve data");
-            //K=3, ETA1=2, ETA2=2, DU=10, DV=4
             test::<{768*3+96},{32*(10*3+4)},3,{2*64},{2*64},{10*32},{4*32},{32+32*(10*3+4)}>(
-                10,4,dk,c,k
+                10,4,&decaps_768[i].0,&decaps_768[i].1,&decaps_768[i].2
             );
         }
-        let dk = data["testGroups"][5]["dk"].as_str().expect("failed to retrieve data");
         for i in 0..10 {
-            let c = data["testGroups"][5]["tests"][i]["c"].as_str().expect("failed to retrieve data");
-            let k = data["testGroups"][5]["tests"][i]["k"].as_str().expect("failed to retrieve data");
-            //K=4, ETA1=2, ETA2=2, DU=11, DV=5
             test::<{768*4+96},{32*(11*4+5)},4,{2*64},{2*64},{11*32},{5*32},{32+32*(11*4+5)}>(
-                11,5,dk,c,k
+                11,5,&decaps_1024[i].0,&decaps_1024[i].1,&decaps_1024[i].2
             );
         }
 
         #[inline]
-        fn test<const DK_LEN:usize, const C_LEN:usize, const K:usize, const ETA1_64:usize, const ETA2_64:usize, const DU_32:usize, const DV_32:usize, const ZC_LEN:usize>(du: u8, dv: u8, dk_str:&str, c_str:&str, k_str:&str) {
-            let mut dk = [0u8;DK_LEN];
-            let mut c = [0u8;C_LEN];
-            decode_to_slice(dk_str,&mut dk).expect("Decode failure");
-            decode_to_slice(c_str,&mut c).expect("Decode failure");
-            let mut k = [0u8;32];
+        fn test<const DK_LEN:usize, const C_LEN:usize, const K:usize, const ETA1_64:usize, const ETA2_64:usize, const DU_32:usize, const DV_32:usize, const ZC_LEN:usize>(du: u8, dv: u8, dk:&[u8], c:&[u8], k:&[u8]) {
+            let mut k1 = [0u8;32];
             let mut c_ = [0u8;C_LEN];
-            let _ = decaps::<K,ETA1_64,ETA2_64,DU_32,DV_32,ZC_LEN>(&dk, &c, &mut k, &mut c_, du, dv);
-            assert_eq!(encode_upper(k),k_str);
+            let _ = decaps::<K,ETA1_64,ETA2_64,DU_32,DV_32,ZC_LEN>(&dk, &c, &mut k1, &mut c_, du, dv);
+            assert_eq!(k1,k);
         }
     }
 }
