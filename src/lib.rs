@@ -23,8 +23,7 @@ pub fn main() {
 
 //TODO: inline
 
-//TODO
-//#![cfg_attr(not(feature = "std"), no_std)]
+#![cfg_attr(not(feature = "std"), no_std)]
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 #![allow(non_camel_case_types)]
