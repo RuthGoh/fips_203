@@ -66,8 +66,7 @@ pub(crate) fn decaps
 
     let mut it = m.iter().chain(dk[768*K+32..768*K+64].iter());
     let m_h:[S;64] = core::array::from_fn(|_| it.next().expect("Some error occured.").clone());
-    let r:[S;32];
-    (*k,r) = g::<64>(&m_h);
+    let (mut k1,r) = g::<64>(&m_h);
     
     let mut it = dk[768*K+64..768*K+96].iter().chain(c.iter());
     let z_c:[S;ZC_LEN] = core::array::from_fn(|_| it.next().expect("Some error occured.").clone());
@@ -75,9 +74,10 @@ pub(crate) fn decaps
 
     kpke::encrypt::<K, ETA1_64, ETA2_64, DU_32, DV_32>(&dk[384*K..768*K+32], &m, &r, c_, du, dv);
 
-    let mut c_match = c != c_;
-    if c_match {*k = ss_to_bytes(&k2)} // Decapsulation failure
+    let mut c_match = c == c_;
+    if c_match {*k = k1} else {*k = ss_to_bytes(&k2)} // Decapsulation failure
     c_match.zeroize();
+    k1.zeroize();
     Ok(())
 }
 
