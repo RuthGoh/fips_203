@@ -9,7 +9,6 @@ pub(crate) fn bytes_to_ss<const LEN:usize>(b:&[u8]) -> [S;LEN] {
     core::array::from_fn(|i| S(b[i]))
 }
 
-
 #[derive(Clone,ZeroizeOnDrop)]
 pub(crate) struct S(pub u8);
 impl ops::BitOrAssign<S> for S {

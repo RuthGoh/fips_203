@@ -40,7 +40,6 @@ use types::{Z,S};
 pub enum Error {
     /// Input failed input checks. Used in `encaps` and `decaps`.
     InvalidInput
-    //TODO: more
 }
 impl core::error::Error for Error {}
 use core::{array, fmt::{Display, Formatter, Result as fmtResult}};
@@ -55,7 +54,6 @@ impl Display for Error {
 const Q: u16 = 3329;
 // UNUSED const N: u16 = 256;
 
-//TODO: rng.fill errors
 /// Struct defining the Random Bit Generator to be used.
 /// 
 #[cfg_attr(feature = "std", doc = r##"
