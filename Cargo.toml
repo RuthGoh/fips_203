@@ -18,4 +18,3 @@ std = ["rand"]
 
 [package.metadata.docs.rs]
 all-features = true
-test = false
