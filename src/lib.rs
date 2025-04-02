@@ -77,9 +77,9 @@ let mut rng = Fips203Rng::custom(r, f);
 "##)]
 pub struct Fips203Rng<T> {
     /// A random number generator with type T.
-    pub rng: T,
+    rng: T,
     /// A function which takes in an RNG of type T and returns a randomly-filled 32-byte array.
-    pub f: fn(&mut T) -> [u8;32],
+    f: fn(&mut T) -> [u8;32],
     /// A private function which converts `[u8;32]` to `[S;32]`. Must also zero byte-array.
     g: fn(&mut [u8;32]) -> [S;32]
 }
