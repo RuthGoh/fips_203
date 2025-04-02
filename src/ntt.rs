@@ -1,6 +1,8 @@
+use crate::Z;
+
 // Pre-calculated values for as shown in Appendix A
 // for 17^BitRev7(index) mod 3329
-const ZETA_LOOKUP: [i32;128] = [
+const ZETA_LOOKUP: [u16;128] = [
     1,1729,2580,3289,2642,630,1897,848,
     1062,1919,193,797,2786,3260,569,1746,
     296,2447,1339,1476,3046,56,2240,1333,
@@ -20,7 +22,7 @@ const ZETA_LOOKUP: [i32;128] = [
 ];
 // for 17^(2*BitRev7(index)+1)
 // negative values have been replaced, mod 3329
-const GAMMA_LOOKUP: [u64;128] = [
+const GAMMA_LOOKUP: [u16;128] = [
     17, 3312, 2761, 568, 583, 2746, 2649, 680, 
     1637, 1692, 723, 2606, 2288, 1041, 1100, 2229, 
     1409, 1920, 2662, 667, 3281, 48, 233, 3096, 
@@ -39,30 +41,24 @@ const GAMMA_LOOKUP: [u64;128] = [
     2110, 1219, 2935, 394, 885, 2444, 2154, 1175
 ];
 
-static Q: i32 = crate::Q as i32;
-
-pub(crate) fn ntt(f:&[u16;256]) -> [u16;256] {
-    let mut f:[i32;256] = core::array::from_fn(|i| f[i] as i32);
-
+pub(crate) fn ntt(mut f:[Z;256]) -> [Z;256] {
     let mut len: usize = 128;
     let mut i: usize = 1;
     while len>=2 {
         for start in (0..256).step_by(2*len) {
             for j in start..(start+len) {
-                let t = (ZETA_LOOKUP[i]*f[j+len])%Q;
-                f[j+len] = (f[j] as i32 - t as i32).rem_euclid(Q);
-                f[j] = (f[j] + t)%Q;
+                let t = &(&Z(ZETA_LOOKUP[i])*&f[j+len]);
+                f[j+len] = &f[j] - t;
+                f[j] = &f[j] + t;
             }
             i += 1;
         }
         len >>= 1;
     }
-    f.map(|x| x as u16)
+    f
 }
 
-pub(crate) fn ntt_inv(f:&[u16;256]) -> [u16;256] {
-    let mut f:[i32;256] = core::array::from_fn(|i| f[i] as i32);
-    
+pub(crate) fn ntt_inv(mut f:[Z;256]) -> [Z;256] {
     let mut len: usize = 2;
     let mut start: usize;
     let mut i: usize = 127;
@@ -70,33 +66,32 @@ pub(crate) fn ntt_inv(f:&[u16;256]) -> [u16;256] {
         start = 0;
         while start < 256 {
             for j in start..(start+len) {
-                let t = f[j];
-                f[j] = (t + f[j+len])%Q;
-                f[j+len] = (ZETA_LOOKUP[i]*(f[j+len]-t)).rem_euclid(Q);
+                let t = &f[j].clone();
+                f[j] = t + &f[j+len];
+                f[j+len] = &Z(ZETA_LOOKUP[i])*&(&f[j+len]-t);
             }
             i -= 1;
             start += len<<1;
         }
         len <<= 1;
     }
-    for e in f.iter_mut() {*e = (*e*3303)%Q}
-    f.map(|x| x as u16)
+    for i in 0..256 {
+        f[i] = &f[i]*&Z(3303);
+    }
+    f
 }
 
-pub(crate) fn multiply_ntts(f:&[u16;256], g:&[u16;256]) -> [u16;256] {
-    let base_case_multiply = |a0:u64, a1:u64, b0:u64, b1:u64, gamma:u64| {
+pub(crate) fn multiply_ntts(f:&[Z;256], g:&[Z;256]) -> [Z;256] {
+    let base_case_multiply = |a0:&Z, a1:&Z, b0:&Z, b1:&Z, gamma:&Z| {
         (
-            ((a0*b0+a1*b1*gamma)%Q as u64) as u16,
-            ((a0*b1+a1*b0)%Q as u64) as u16
+            ((&(a0*b0)+&(&(a1*b1)*gamma))),
+            ((&(a0*b1)+&(a1*b0)))
         )
     };
     
-    let mut h: [u16;256] = [0;256];
+    let mut h: [Z;256] = core::array::from_fn(|_| Z(0));
     for i in 0..128 {
-        (h[2*i],h[2*i+1]) = base_case_multiply(
-            f[2*i] as u64, f[2*i+1] as u64, 
-            g[2*i] as u64, g[2*i+1] as u64, 
-            GAMMA_LOOKUP[i]);
+        (h[2*i],h[2*i+1]) = base_case_multiply(&f[2*i], &f[2*i+1], &g[2*i], &g[2*i+1], &Z(GAMMA_LOOKUP[i]));
     }
     h
 }

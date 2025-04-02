@@ -14,21 +14,17 @@ use fips203::{MLKEM_1024, Fips203Rng};
 pub fn main() {
     let mut rng = Fips203Rng::default();
     let (ek,dk) = MLKEM_1024::keygen(&mut rng);
-    let (k,c) = MLKEM_1024::encaps(&ek, &mut rng).expect("Encapsulation failure");
-    let k_prime = MLKEM_1024::decaps(&dk, &c).expect("Decapsulation failure");
+    let (k,c) = MLKEM_1024::encaps(ek, &mut rng).expect("Encapsulation failure");
+    let k_prime = MLKEM_1024::decaps(dk, c).expect("Decapsulation failure");
     if k != k_prime {panic!("Decapsulation failure")}
 }
 ```
 "##)]
 
-//TODO: inline
-
 #![cfg_attr(not(feature = "std"), no_std)]
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 #![allow(non_camel_case_types)]
-
-//use zeroize::Zeroizing;
 
 mod crypto_fns;
 mod byte_fns;
@@ -36,16 +32,18 @@ mod sample;
 mod ntt;
 mod kpke;
 mod mlkem;
+mod types;
+use types::{Z,S};
 
 /// Custom errors for the package
 #[derive(Debug)]
 pub enum Error {
-    /// Input failed input checks. Used in `encaps` and `decaps`
+    /// Input failed input checks. Used in `encaps` and `decaps`.
     InvalidInput
     //TODO: more
 }
 impl core::error::Error for Error {}
-use core::fmt::{Display, Formatter, Result as fmtResult};
+use core::{array, fmt::{Display, Formatter, Result as fmtResult}};
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter) -> fmtResult {
         match self {
@@ -83,8 +81,15 @@ pub struct Fips203Rng<T> {
     /// A random number generator with type T.
     pub rng: T,
     /// A function which takes in an RNG of type T and returns a randomly-filled 32-byte array.
-    pub f: fn(&mut T) -> [u8;32]
+    pub f: fn(&mut T) -> [u8;32],
+    /// A private function which converts `[u8;32]` to `[S;32]`. Must also zero byte-array.
+    g: fn(&mut [u8;32]) -> [S;32]
 }
+const G:fn(&mut [u8;32]) -> [S;32] = |r:&mut [u8;32]| {
+    let a: [S; 32] = array::from_fn(|i| S(r[i]));
+    r.zeroize();
+    a
+};
 #[cfg(feature = "std")]
 use rand::{prelude::ThreadRng, Rng};
 #[cfg(feature = "std")]
@@ -104,7 +109,8 @@ impl Default for Fips203Rng<ThreadRng> {
             rng: rand::rng(),
             f: |rng:&mut ThreadRng| {
                 rng.random::<[u8;32]>()
-            }
+            },
+            g: G
         }
     }
 }
@@ -115,11 +121,13 @@ impl<T> Fips203Rng<T> {
     pub fn custom(r:T, func:fn(&mut T) -> [u8;32]) -> Self {
         Fips203Rng::<T> {
             rng: r,
-            f: func
+            f: func,
+            g: G
         }
     }
 }
 
+use zeroize::Zeroize;
 macro_rules! impl_mlkem {
     ($name:ident, $k:expr, $eta1:expr, $eta2:expr, $du:expr, $dv:expr) => {
         /// Module for ML-KEM.
@@ -139,7 +147,7 @@ macro_rules! impl_mlkem {
             pub fn keygen<T>(rng:&mut Fips203Rng<T>) -> ([u8;EK_LEN], [u8;DK_LEN]) {
                 let mut ek = [0u8;EK_LEN];
                 let mut dk = [0u8;DK_LEN];
-                mlkem::keygen::<T, {$k}, {$eta1*64}>(rng, &mut ek, &mut dk);
+                mlkem::keygen::<T, {$k}, {$eta1*64}, EK_LEN>(rng, &mut ek, &mut dk);
                 (ek,dk)
             }
 
@@ -152,13 +160,15 @@ macro_rules! impl_mlkem {
             /// * `rng` An implementation of [`Fips203Rng`]
             /// # Returns
             /// * `Result<(shared secret key, ciphertext), Error>`
-            pub fn encaps<T>(ek:&[u8;EK_LEN], rng:&mut Fips203Rng<T>) -> Result<([u8;32],[u8;C_LEN]),Error> {
+            pub fn encaps<T>(mut ek:[u8;EK_LEN], rng:&mut Fips203Rng<T>) -> Result<([u8;32],[u8;C_LEN]),Error> {
+                let ek_s = types::bytes_to_ss::<EK_LEN>(&ek);
+                ek.zeroize();
                 let mut k = [0u8;32];
-                let mut c = [0u8;C_LEN];
+                let mut c: [S;C_LEN] = core::array::from_fn(|_| S(0));
                 match mlkem::encaps::
-                <T, {$k}, {$eta1*64}, {$eta2*64}, {$du*32}, {$dv*32}>
-                (ek, rng, &mut k, &mut c, $du, $dv) {
-                    Ok(_) => Ok((k,c)),
+                <T, {$k}, {$eta1*64}, {$eta2*64}, {$du*32}, {$dv*32}, EK_LEN>
+                (&ek_s, rng, &mut k, &mut c, $du, $dv) {
+                    Ok(_) => Ok((k,types::ss_to_bytes(&c))),
                     Err(e) => Err(e)
                 }
             }
@@ -172,12 +182,16 @@ macro_rules! impl_mlkem {
             /// * `c` A ciphertext
             /// # Returns
             /// * `Result<shared secret key, Error>`
-            pub fn decaps(dk:&[u8;DK_LEN], c:&[u8;C_LEN]) -> Result<[u8;32], Error> {
+            pub fn decaps(mut dk:[u8;DK_LEN], mut c:[u8;C_LEN]) -> Result<[u8;32], Error> {
+                let dk_s = types::bytes_to_ss::<DK_LEN>(&dk);
+                dk.zeroize();
+                let c_s = types::bytes_to_ss::<C_LEN>(&c);
+                c.zeroize();
                 let mut k = [0u8;32];
-                let mut c_ = [0u8;C_LEN];
+                let mut c_:[S;C_LEN] = core::array::from_fn(|_| S(0));
                 match mlkem::decaps::
-                <{$k}, {$eta1*64}, {$eta2*64}, {$du*32}, {$dv*32}, {32+32*($du*$k+$dv)}>
-                (dk, c, &mut k, &mut c_, $du, $dv) {
+                <{$k}, {$eta1*64}, {$eta2*64}, {$du*32}, {$dv*32}, {32+32*($du*$k+$dv)}, {384*$k+32}>
+                (&dk_s, &c_s, &mut k, &mut c_, $du, $dv) {
                     Ok(_) => Ok(k),
                     Err(e) => Err(e)
                 }
@@ -194,8 +208,8 @@ macro_rules! impl_mlkem {
                     let mut rng = Fips203Rng::default();
                     for _ in 0..10 {
                         let (ek,dk) = keygen(&mut rng);
-                        let (k,c) = encaps(&ek, &mut rng).expect("Encaps fail.");
-                        let k_ = decaps(&dk, &c).expect("Decaps fail.");
+                        let (k,c) = encaps(ek, &mut rng).expect("Encaps fail.");
+                        let k_ = decaps(dk, c).expect("Decaps fail.");
                         assert_eq!(k,k_);
                     }
                 }
@@ -208,16 +222,16 @@ macro_rules! impl_mlkem {
                     let mut rng = Fips203Rng::default();
                     for _ in 0..5 {
                         let (ek,mut dk) = keygen(&mut rng);
-                        let (k,c) = encaps(&ek, &mut rng).expect("Encaps fail.");
+                        let (k,c) = encaps(ek, &mut rng).expect("Encaps fail.");
 
                         // create random `c`
                         let c_ = rand::random::<[u8;C_LEN]>();
-                        let k_ = decaps(&dk, &c_).expect("Decaps fail.");
+                        let k_ = decaps(dk, c_).expect("Decaps fail.");
                         assert_ne!(k,k_);
 
                         // modify `dk`
                         for i in 0..10 {dk[i] = 0;}
-                        let k_ = decaps(&dk, &c).expect("Decaps fail.");
+                        let k_ = decaps(dk, c).expect("Decaps fail.");
                         assert_ne!(k,k_);
                     }
                 }
@@ -225,24 +239,24 @@ macro_rules! impl_mlkem {
                 #[test]
                 /// Test a complete run-through with a custom RNG.
                 fn test_custom_rng() {
-                    let mut rng = Fips203Rng::custom((),|rng:&mut ()| {[0u8;32]});
+                    let mut rng = Fips203Rng::custom((),|_rng:&mut ()| {[0u8;32]});
                     let (ek,dk) = keygen(&mut rng);
-                    let (k,c) = encaps(&ek, &mut rng).expect("Encaps fail.");
-                    let k_ = decaps(&dk, &c).expect("Decaps fail.");
+                    let (k,c) = encaps(ek, &mut rng).expect("Encaps fail.");
+                    let k_ = decaps(dk, c).expect("Decaps fail.");
                     assert_eq!(k,k_);
                 }
 
                 #[test]
                 /// Also see `test_compile_fail`.
                 fn test_encaps_input_checks() {
-                    let mut rng = Fips203Rng::custom((),|rng:&mut ()| {[0u8;32]});
+                    let mut rng = Fips203Rng::custom((),|_rng:&mut ()| {[0u8;32]});
                     let mut ek = [0u8;EK_LEN];
-                    let mut tmp = [0u16;256];
-                    tmp[0] = 3329;
+                    let mut tmp: [Z;256] = core::array::from_fn(|_| Z(0));
+                    tmp[0] = Z(3329);
                     for i in 0..$k {
-                        ek[i*384..i*384+384].clone_from_slice(&byte_fns::byte_encode::<{32*12}>(12, &tmp));
+                        ek[i*384..i*384+384].clone_from_slice(&types::ss_to_bytes::<384>(&byte_fns::byte_encode::<{32*12}>(12, &tmp)));
                     }
-                    match encaps(&ek, &mut rng) {
+                    match encaps(ek, &mut rng) {
                         Err(Error::InvalidInput) => (),
                         _ => panic!("encaps did not produce expected error.")
                         
@@ -252,11 +266,11 @@ macro_rules! impl_mlkem {
                 #[test]
                 /// Also see `test_compile_fail`.
                 fn test_decaps_input_checks() {
-                    let mut rng = Fips203Rng::custom((),|rng:&mut ()| {[0u8;32]});
+                    let mut rng = Fips203Rng::custom((),|_rng:&mut ()| {[0u8;32]});
                     let (ek,mut dk) = keygen(&mut rng);
                     if dk[384*$k] == 0 {dk[384*$k] = 1;} else {dk[384*$k] = 0;}
-                    let (_,c) = encaps(&ek, &mut rng).expect("Encaps fail.");
-                    match decaps(&dk, &c) {
+                    let (_,c) = encaps(ek, &mut rng).expect("Encaps fail.");
+                    match decaps(dk, c) {
                         Err(Error::InvalidInput) => (),
                         _ => panic!("decaps did not produce expected error.")
                     }
@@ -265,24 +279,41 @@ macro_rules! impl_mlkem {
             /// Empty function to test code which fails to compile as doc_tests.
             /// 
             /// Test `encaps` input check
+            /// ```compile_pass
+            /// use fips203::{MLKEM_512,Fips203Rng};
+            /// let mut rng = Fips203Rng::custom((),|_rng:&mut ()| {[0u8;32]});
+            /// let ek = [0u8;384*2+32];
+            /// let _ = encaps(ek, &mut rng).expect("Encaps fail.");
+            /// ```
             /// ```compile_fail
-            /// let mut rng = Fips203Rng::custom((),|rng:&mut ()| {[0u8;32]});
+            /// use fips203::{MLKEM_512,Fips203Rng};
+            /// let mut rng = Fips203Rng::custom((),|_rng:&mut ()| {[0u8;32]});
             /// let ek = [0u8;32];
-            /// let _ = encaps(&ek, &mut rng).expect("Encaps fail.");
+            /// let _ = encaps(ek, &mut rng).expect("Encaps fail.");
             /// ```
             /// 
             /// 
             /// Test `decaps` input check
+            /// ```compile_pass
+            /// // Test `c` length check
+            /// use fips203::MLKEM_512;
+            /// let _ = decaps([0u8;768*2+96], [0u8;32*(10*2+4)]).expect("Decaps fail.");
+            /// ```
             /// ```compile_fail
             /// // Test `c` length check
-            /// let c = [0u8;32];
-            /// let _ = decaps(&[0u8;DK_LEN], &c).expect("Decaps fail.");
+            /// use fips203::MLKEM_512;
+            /// let _ = decaps([0u8;768*2+96], [0u8;32]).expect("Decaps fail.");
             /// ```
             /// 
+            /// ```compile_pass
+            /// // Test `dk` length check
+            /// use fips203::MLKEM_512;
+            /// let _ = MLKEM_1024::decaps([0u8;768*2+96], [0u8;32*(10*2+4)]).expect("Decapsulation failure");
+            /// ```
             /// ```compile_fail
             /// // Test `dk` length check
-            /// let dk = [0u8;32];
-            /// let _ = decaps(&dk, &[0u8;C_LEN]).expect("Decaps fail.");
+            /// use fips203::MLKEM_512;
+            /// let _ = MLKEM_1024::decaps([0u8;32], [0u8;32*(10*2+4)]).expect("Decapsulation failure");
             /// ```
             #[allow(dead_code)]
             fn test_compile_fail() {}

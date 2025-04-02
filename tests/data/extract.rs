@@ -11,7 +11,7 @@ fn append_data(d:&[u8]) {
     // Open the file in append mode
     let mut file = OpenOptions::new()
         .append(true)
-        .open("src/data.txt")
+        .open("data1.txt")
         .expect("Unable to open file");
 
     // Append data to the file
@@ -45,7 +45,7 @@ fn get_vecs_keygen() {
             (d1,z,ek,dk)
         }
     );
-    let d_str = format!("const keygen_512:[([u8;32],[u8;32],[u8;384*2+32],[u8;768*2+96]);25] = {:?};",out);
+    let d_str = format!("const keygen_512:[([S;32],[u8;32],[u8;384*2+32],[u8;768*2+96]);25] = {:?};",out);
     let d = d_str.as_bytes();
     append_data(&d);
     
