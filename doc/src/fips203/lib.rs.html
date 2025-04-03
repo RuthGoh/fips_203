@@ -327,7 +327,9 @@
 // cargo check --lib --no-default-features --target thumbv7m-none-eabi
 // cargo check --lib
 
-</span><span class="doccomment">//! Pure Rust implementation of [FIPS 203](https://doi.org/10.6028/NIST.FIPS.203).
+</span><span class="doccomment">//! DO NOT USE. SECURITY CANNOT BE GUARANTEED.
+//! 
+//! Pure Rust implementation of [FIPS 203](https://doi.org/10.6028/NIST.FIPS.203).
 //! 
 //! Use with `default-features=false` for no-std.
 //! 
@@ -365,8 +367,7 @@ pub fn main() {
 </span><span class="kw">pub enum </span>Error {
     <span class="doccomment">/// Input failed input checks. Used in `encaps` and `decaps`.
     </span>InvalidInput
-    <span class="comment">//TODO: more
-</span>}
+}
 <span class="kw">impl </span>core::error::Error <span class="kw">for </span>Error {}
 <span class="kw">use </span>core::{array, fmt::{Display, Formatter, <span class="prelude-ty">Result </span><span class="kw">as </span>fmtResult}};
 <span class="kw">impl </span>Display <span class="kw">for </span>Error {
@@ -380,7 +381,6 @@ pub fn main() {
 <span class="kw">const </span>Q: u16 = <span class="number">3329</span>;
 <span class="comment">// UNUSED const N: u16 = 256;
 
-//TODO: rng.fill errors
 </span><span class="doccomment">/// Struct defining the Random Bit Generator to be used.
 /// 
 </span><span class="attr">#[cfg_attr(feature = <span class="string">"std"</span>, doc = <span class="string">r##"
@@ -404,9 +404,9 @@ let mut rng = Fips203Rng::custom(r, f);
 "##</span>)]
 </span><span class="kw">pub struct </span>Fips203Rng&lt;T&gt; {
     <span class="doccomment">/// A random number generator with type T.
-    </span><span class="kw">pub </span>rng: T,
+    </span>rng: T,
     <span class="doccomment">/// A function which takes in an RNG of type T and returns a randomly-filled 32-byte array.
-    </span><span class="kw">pub </span>f: <span class="kw">fn</span>(<span class="kw-2">&amp;mut </span>T) -&gt; [u8;<span class="number">32</span>],
+    </span>f: <span class="kw">fn</span>(<span class="kw-2">&amp;mut </span>T) -&gt; [u8;<span class="number">32</span>],
     <span class="doccomment">/// A private function which converts `[u8;32]` to `[S;32]`. Must also zero byte-array.
     </span>g: <span class="kw">fn</span>(<span class="kw-2">&amp;mut </span>[u8;<span class="number">32</span>]) -&gt; [S;<span class="number">32</span>]
 }

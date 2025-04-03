@@ -243,8 +243,7 @@
 
     <span class="kw">let </span><span class="kw-2">mut </span>it = m.iter().chain(dk[<span class="number">768</span><span class="kw-2">*</span>K+<span class="number">32</span>..<span class="number">768</span><span class="kw-2">*</span>K+<span class="number">64</span>].iter());
     <span class="kw">let </span>m_h:[S;<span class="number">64</span>] = core::array::from_fn(|<span class="kw">_</span>| it.next().expect(<span class="string">"Some error occured."</span>).clone());
-    <span class="kw">let </span>r:[S;<span class="number">32</span>];
-    (<span class="kw-2">*</span>k,r) = g::&lt;<span class="number">64</span>&gt;(<span class="kw-2">&amp;</span>m_h);
+    <span class="kw">let </span>(<span class="kw-2">mut </span>k1,r) = g::&lt;<span class="number">64</span>&gt;(<span class="kw-2">&amp;</span>m_h);
     
     <span class="kw">let </span><span class="kw-2">mut </span>it = dk[<span class="number">768</span><span class="kw-2">*</span>K+<span class="number">64</span>..<span class="number">768</span><span class="kw-2">*</span>K+<span class="number">96</span>].iter().chain(c.iter());
     <span class="kw">let </span>z_c:[S;ZC_LEN] = core::array::from_fn(|<span class="kw">_</span>| it.next().expect(<span class="string">"Some error occured."</span>).clone());
@@ -252,9 +251,10 @@
 
     kpke::encrypt::&lt;K, ETA1_64, ETA2_64, DU_32, DV_32&gt;(<span class="kw-2">&amp;</span>dk[<span class="number">384</span><span class="kw-2">*</span>K..<span class="number">768</span><span class="kw-2">*</span>K+<span class="number">32</span>], <span class="kw-2">&amp;</span>m, <span class="kw-2">&amp;</span>r, c_, du, dv);
 
-    <span class="kw">let </span><span class="kw-2">mut </span>c_match = c != c_;
-    <span class="kw">if </span>c_match {<span class="kw-2">*</span>k = ss_to_bytes(<span class="kw-2">&amp;</span>k2)} <span class="comment">// Decapsulation failure
+    <span class="kw">let </span><span class="kw-2">mut </span>c_match = c == c_;
+    <span class="kw">if </span>c_match {<span class="kw-2">*</span>k = k1} <span class="kw">else </span>{<span class="kw-2">*</span>k = ss_to_bytes(<span class="kw-2">&amp;</span>k2)} <span class="comment">// Decapsulation failure
     </span>c_match.zeroize();
+    k1.zeroize();
     <span class="prelude-val">Ok</span>(())
 }
 

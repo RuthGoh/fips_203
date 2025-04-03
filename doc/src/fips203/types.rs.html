@@ -96,8 +96,7 @@
 <a href="#95" id="95">95</a>
 <a href="#96" id="96">96</a>
 <a href="#97" id="97">97</a>
-<a href="#98" id="98">98</a>
-<a href="#99" id="99">99</a></pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::Q;
+<a href="#98" id="98">98</a></pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::Q;
 <span class="kw">use </span>zeroize::ZeroizeOnDrop;
 <span class="kw">use </span>core::{ops,cmp};
 
@@ -107,7 +106,6 @@
 <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>bytes_to_ss&lt;<span class="kw">const </span>LEN:usize&gt;(b:<span class="kw-2">&amp;</span>[u8]) -&gt; [S;LEN] {
     core::array::from_fn(|i| S(b[i]))
 }
-
 
 <span class="attr">#[derive(Clone,ZeroizeOnDrop)]
 </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>S(<span class="kw">pub </span>u8);

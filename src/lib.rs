@@ -2,6 +2,8 @@
 // cargo check --lib --no-default-features --target thumbv7m-none-eabi
 // cargo check --lib
 
+//! DO NOT USE. SECURITY CANNOT BE GUARANTEED.
+//! 
 //! Pure Rust implementation of [FIPS 203](https://doi.org/10.6028/NIST.FIPS.203).
 //! 
 //! Use with `default-features=false` for no-std.
